@@ -1,0 +1,298 @@
+(*
+   Copyright 2013 Krotov Anton
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU Lesser General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU Lesser General Public License for more details.
+
+   You should have received a copy of the GNU Lesser General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+   *)
+лндскэ RTL;
+
+хлонпр sys := SYSTEM,
+   ЛюОХ := ЛНДюох;
+
+рхош
+   IntArray = люяяхб 2048 хг жекне;
+   STRING = люяяхб 2048 хг кхр;
+   PROC = опнжедспю;
+
+оепел
+   SelfName, rtab: жекне;
+   CloseProc: PROC;
+
+опнжедспю [stdcall] _halt*(n: жекне);
+   мювюкн
+     ЛюОХ.ExitProcess(n)
+   йнмеж _halt;
+
+опнжедспю [stdcall] _newrec*(ПЮГЛЕП_, t: жекне; оеп ptr: жекне);
+   мювюкн
+      ptr := ЛюОХ.оЮЛЪРЭ_оНКСВХРЭ(ПЮГЛЕП_);
+      еякх ptr # 0 рнцдю
+         sys.PUT(ptr, t);
+         дна(ptr, 4)
+      йнмеж
+   йнмеж _newrec;
+
+опнжедспю [stdcall] _disprec*(оеп ptr: жекне);
+   мювюкн
+      еякх ptr # 0 рнцдю
+         бшв(ptr, 4);
+         ptr := ЛюОХ.оЮЛЪРЭ_нЯБНАНДХРЭ(ptr)
+      йнмеж
+   йнмеж _disprec;
+
+опнжедспю [stdcall] _rset*(y, x: жекне);
+   (* ГЮВЕЛ ГДЕЯЭ ОЕПЕЛЕММШЕ??? *)
+   мювюкн
+     sys.CODE("8B45088B4D0C3BC87F0A83F91F760B83F81F760633C0C9C2080083F9007D0233C983F81F7E05B81F000000BA000000802BC8F7D9D3FA83E81F8BC8F7D9D3EA8BC2C9C20800")
+   йнмеж _rset;
+
+опнжедспю [stdcall] _inset*(y, x: жекне);
+   (* ГЮВЕЛ ГДЕЯЭ ОЕПЕЛЕММШЕ??? *)
+   мювюкн
+     sys.CODE("8B45088B4D0C83F91F7709D3E883E001C9C20800C933C0C20800")
+   йнмеж _inset;
+
+опнжедспю [stdcall] _checktype*(table, t, r: жекне);
+   (* ГЮВЕЛ ГДЕЯЭ ОЕПЕЛЕММШЕ??? *)
+   мювюкн
+      table := rtab;
+      sys.CODE("8B450C8B4D1085C975076A0158C9C20C008B51FC8B4D083BD0740D85D27409C1E20203D18B12EBEF33C93BC20F94C18BC1C9C20C00")
+   йнмеж _checktype;
+
+опнжедспю [stdcall] _savearr*(ПЮГЛЕП_, ХЯРНВМХЙ_, МЮГМЮВЕМХЕ_: жекне);
+   (* ГЮВЕЛ ГДЕЯЭ ОЕПЕЛЕММШЕ??? *)
+   мювюкн
+      sys.CODE("9CFC8BD78BC68B7D108B750C8B4D08F3A48BFA8BF09D")
+   йнмеж _savearr;
+
+опнжедспю [stdcall] _saverec*(dyn, stat, ПЮГЛЕП_, ХЯРНВМХЙ_, МЮГМЮВЕМХЕ_: жекне): аскебн;
+   оепел
+      res: аскебн;
+   мювюкн
+      res := dyn = stat;
+      еякх res рнцдю
+         _savearr(ПЮГЛЕП_, ХЯРНВМХЙ_, МЮГМЮВЕМХЕ_)
+      йнмеж
+      бепмсрэ res
+   йнмеж _saverec;
+
+опнжедспю [stdcall] _arrayidx*(Dim: жекне; оеп Arr: IntArray; bsize, idx, c: жекне);
+   оепел
+      i, m: жекне;
+   мювюкн
+      m := bsize * idx;
+      дкъ i := 4 дн Dim + 2 декюрэ
+         m := m * Arr[i]
+      йнмеж;
+      еякх (Arr[3] > idx) & (idx >= 0) рнцдю
+         Arr[3] := c + m
+      хмюве
+         Arr[3] := 0
+      йнмеж
+   йнмеж _arrayidx;
+
+опнжедспю [stdcall] _arrayidx1*(оеп Arr: IntArray; bsize, idx, c: жекне);
+   мювюкн
+      еякх (Arr[3] > idx) & (idx >= 0) рнцдю
+         Arr[3] := bsize * idx + c
+      хмюве
+         Arr[3] := 0
+      йнмеж
+   йнмеж _arrayidx1;
+
+опнжедспю [stdcall] _arrayrot*(m, n: жекне; оеп Arr: IntArray);
+   оепел
+      i, j, t: жекне;
+   мювюкн
+      дкъ i := 1 дн n декюрэ
+         t := Arr[0];
+         дкъ j := 0 дн m + n - 1 декюрэ
+            Arr[j] := Arr[j + 1]
+         йнмеж;
+         Arr[m + n] := t
+      йнмеж
+   йнмеж _arrayrot;
+
+опнжедспю Min(a, b: жекне): жекне;
+   оепел
+      res: жекне;
+   мювюкн
+      еякх a < b рнцдю
+         res := a
+      хмюве
+         res := b
+      йнмеж
+      бепмсрэ res
+   йнмеж Min;
+
+опнжедспю [stdcall] _length*(s: люяяхб хг кхр): жекне;
+   мювюкн
+      sys.CODE("8B4508");     //  mov     eax, [ebp + 08h]
+      sys.CODE("8B4D0C");     //  mov     ecx, [ebp + 0Ch]
+      sys.CODE("48");         //  dec     eax
+                             //  L1:
+      sys.CODE("40");         //  inc     eax
+      sys.CODE("803800");     //  cmp     byte ptr [eax], 0
+      sys.CODE("7403");       //  jz      L2
+      sys.CODE("E2F8");       //  loop    L1
+      sys.CODE("40");         //  inc     eax
+                             //  L2:
+      sys.CODE("2B4508");     //  sub     eax, [ebp + 08h]
+      sys.CODE("C9");         //  leave
+      sys.CODE("C20800");     //  ret     08h
+      бепмсрэ 0
+   йнмеж _length;
+
+опнжедспю [stdcall] _strcopy*(b, blen, a, alen: жекне);
+   мювюкн
+     _savearr(Min(alen, blen), a, b);
+     еякх blen > alen рнцдю
+       sys.PUT(b + alen, 0X)
+     йнмеж
+   йнмеж _strcopy;
+
+опнжедспю [stdcall] _strcmp*(op: жекне; b, a: люяяхб хг кхр): аскебн;
+   оепел
+      i: жекне;
+      Res: аскебн;
+   мювюкн
+      i := ЛюОХ.strncmp(sys.ADR(a), sys.ADR(b), Min(LEN(a), LEN(b)));
+      еякх i = 0 рнцдю
+         i := _length(a) - _length(b)
+      йнмеж;
+      бшанп op хг
+         |0: Res := i = 0
+         |1: Res := i # 0
+         |2: Res := i < 0
+         |3: Res := i > 0
+         |4: Res := i <= 0
+         |5: Res := i >= 0
+      хмюве
+      йнмеж;
+      бепмсрэ Res
+   йнмеж _strcmp;
+
+опнжедспю [stdcall] _lstrcmp*(op: жекне; b: кхр; a: люяяхб хг кхр): аскебн;
+   оепел
+      s: люяяхб 2 хг кхр;
+   мювюкн
+      s[0] := b;
+      s[1] := 0X;
+      бепмсрэ _strcmp(op, s, a)
+   йнмеж _lstrcmp;
+
+опнжедспю [stdcall] _rstrcmp*(op: жекне; b: люяяхб хг кхр; a: кхр): аскебн;
+   оепел
+      s: люяяхб 2 хг кхр;
+   мювюкн
+      s[0] := a;
+      s[1] := 0X;
+      бепмсрэ _strcmp(op, b, s)
+   йнмеж _rstrcmp;
+
+опнжедспю Int(x: жекне; оеп str: STRING);
+   оепел
+      i, a, b: жекне;
+      c: кхр;
+   мювюкн
+      i := 0;
+      a := 0;
+      онбрнпърэ
+         str[i] := CHR(x MOD 10 + ORD("0"));
+         x := x DIV 10;
+         дна(i)
+      онйюме x = 0;
+      b := i - 1;
+      WHILE a < b DO
+         c := str[a];
+         str[a] := str[b];
+         str[b] := c;
+         дна(a);
+         бшв(b)
+      йнмеж;
+      str[i] := 0X
+   йнмеж Int;
+
+опнжедспю StrAppend(оеп str: STRING; оеп pos: жекне; s: люяяхб хг кхр);
+   оепел
+      i, n: жекне;
+   мювюкн
+      n := LEN(s);
+      i := 0;
+      онйю (i < n) & (s[i] # 0X) DO
+         str[pos] := s[i];
+         дна(pos);
+         дна(i)
+      йнмеж
+   йнмеж StrAppend;
+
+опнжедспю [stdcall] _assrt*(code, m: жекне; modname: STRING; line: жекне);
+   оепел
+      msg, int: STRING;
+      pos, n: жекне;
+   мювюкн
+      pos := 0;
+      n := line MOD 16;
+      line := line DIV 16;
+      бшанп n хг
+         |1: StrAppend(msg, pos, "МЮПСЬЕМХЕ ЙНМРПНКЪ")
+         |2: StrAppend(msg, pos, "ОЕПЕЛЕММШЕ РХОЮ ОПНЖЕДСПШ ХЛЕЕР NIL Б ЙЮВЕЯРБЕ ГМЮВЕМХЪ")
+         |3: StrAppend(msg, pos, "НЬХАЙЮ НУПЮМШ РХОЮ")
+         |4: StrAppend(msg, pos, "МЕДНОСЯРХЛШИ ДХМЮЛХВЕЯЙХИ РХО")
+         |5: StrAppend(msg, pos, "НЬХАЙЮ ОПНБЕПЙХ ХМДЕЙЯЮ")
+         |6: StrAppend(msg, pos, "СЙЮГЮРЕКЭ осярн ПЮГШЛЕМНБЮМ")
+         |7: StrAppend(msg, pos, "МЕДНОСЯРХЛНЕ ГМЮВЕМХЕ Б НОЕПЮРНПЕ бшанп")
+         |8: StrAppend(msg, pos, "ДЕКЕМХЕ МЮ МНКЭ")
+      хмюве
+      йнмеж;
+      StrAppend(msg, pos, 0DX);
+      StrAppend(msg, pos, 0AX);
+      StrAppend(msg, pos, "ЛНДСКЭ ");
+      StrAppend(msg, pos, modname);
+      StrAppend(msg, pos, 0DX);
+      StrAppend(msg, pos, 0AX);
+      StrAppend(msg, pos, "ЯРПНЙЮ ");
+      Int(line, int);
+      StrAppend(msg, pos, int);
+      еякх m = 2 рнцдю
+         StrAppend(msg, pos, 0DX);
+         StrAppend(msg, pos, 0AX);
+         StrAppend(msg, pos, "code ");
+         Int(code, int);
+         StrAppend(msg, pos, int)
+      йнмеж;
+      ЛюОХ.яННАЫ_нРКЮДЙХ(sys.ADR(msg), SelfName)
+   йнмеж _assrt;
+
+опнжедспю [stdcall] _close*;
+   мювюкн
+      еякх CloseProc # NIL рнцдю
+         CloseProc
+      йнмеж
+   йнмеж _close;
+
+опнжедспю [stdcall] _init*(self, rec, gsize, gadr, esp: жекне);
+   мювюкн
+      ЛюОХ.zeromem(gsize, gadr);
+      ЛюОХ.мЮЯРПНХРЭ(esp);
+      SelfName := self;
+      rtab := rec;
+      CloseProc := осярн;
+   йнмеж _init;
+
+опнжедспю SetClose*(proc: PROC);
+   мювюкн
+     CloseProc := proc
+   йнмеж SetClose;
+
+END RTL.

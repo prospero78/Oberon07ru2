@@ -1,0 +1,2057 @@
+(*
+   Copyright 2013 Krotov Anton
+
+   This file is part of Compiler.
+
+   Compiler is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+
+   Compiler is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with Compiler. If not, see <http://www.gnu.org/licenses/>.
+   *)
+МОДУЛЬ модАсмИнтел32;
+
+ИМПОРТ мУтиль := модУтиль,
+   mSys := SYSTEM,
+   мСкан := модСканер,
+   мФайл := модФайл,
+   мКонст := модКонстанты,
+   мКонс := модКонсоль,
+   мОш := модОшибки,
+   мПроц := модПроцесс,
+   мПам := модПамять,
+   мЗвено := модЗвено,
+   мЦепь := модЦепь,
+   мСтр := модСтроки,
+   мКс := модКлючСлово,
+   мАт := модАсмТипы,
+   мКрд := модКоординаты;
+
+КОНСТ
+   JMP* = 0E9X; CALL = 0E8X;
+   JE = 84X; JNE = 85X; JLE = 8EX; JGE = 8DX; JG = 8FX; JL = 8CX;
+
+   JCMD = 1; LCMD = 2; GCMD = 3; OCMD = 4; ECMD = 5;
+   PUSH_EAX = 6;
+   PUSHECX = 7;
+   PUSHEDX = 8;
+   POPEAX = 9;
+   POPECX = 10;
+   POPEDX = 11;
+
+   ICMP1 = 13;
+   ICMP2 = 14;
+
+   defcall = 0; stdcall = 1; cdecl = 2; winapi = 3;
+
+   _rset* = 0; _inset* = 1; _saverec* = 2; _length* = 3; _checktype* = 4; _strcmp* = 5;
+   _lstrcmp* = 6; _rstrcmp* = 7; _savearr* = 8; _newrec* = 9; _disprec* = 10; _arrayidx* = 11;
+   _arrayrot* = 12; _assrt* = 13; _strcopy* = 14; _arrayidx1* = 15; _init* = 16; _close* = 17; _halt* = 18;
+   ASSRT = 19; hInstance = 20; SELFNAME = 21; RTABLE = 22;
+
+   LoadLibrary = 23;
+   GetProcAddress = 24;
+   Exports = 25; szSTART = 26; START = 27; szversion = 28; HALT = 29;
+
+   FREGS = 8;
+
+ТИПЫ
+
+   TFLT = МАССИВ 2 ИЗ ЦЕЛОЕ;
+
+   TIDXа = ЗАПИСЬ
+      КОНЕЦ;
+
+   туTIDX* = УКАЗАТЕЛЬ НА ЗАПИСЬ(TIDXа)
+         мас_размерн*: МАССИВ мКонст.мас_вин ИЗ ЦЕЛОЕ
+      КОНЕЦ;
+
+   тСекцияИмя = МАССИВ 8 ИЗ ЛИТ;
+
+   тСекция = ЗАПИСЬ
+         имя: тСекцияИмя;
+         цРазмер, цАдрес, sizealign, OAPfile, reserved6, reserved7, reserved8, attrflags: ЦЕЛОЕ
+      КОНЕЦ;
+
+   тЗаголовок = ЗАПИСЬ
+         msdos: МАССИВ 180 ИЗ ЛИТ;
+         typecomp, seccount: mSys.CARD16;
+         time, reserved1, reserved2: ЦЕЛОЕ;
+         PEoptsize, infflags, PEfile, compver: mSys.CARD16;
+         codesize, datasize, initdatasize, startadr,
+         codeadr, rdataadr, loadadr, secalign, filealign,
+         oldestver, version, oldestverNT, reserved3,
+         filesize, headersize, dllcrc: ЦЕЛОЕ;
+         UI, reserved4: mSys.CARD16;
+         stksize, stkalloc, heapsize, heapalloc, reserved5, structcount: ЦЕЛОЕ;
+         structs: МАССИВ 16 ИЗ ЗАПИСЬ adr, size: ЦЕЛОЕ КОНЕЦ;
+         sections: МАССИВ 3 ИЗ тСекция
+      КОНЕЦ;
+
+   тЗаголовокCoff = ЗАПИСЬ
+         Machine: mSys.CARD16;
+         NumberOfSections: mSys.CARD16;
+         TimeDateStamp,
+         PointerToSymbolTable,
+         NumberOfSymbols: ЦЕЛОЕ;
+         SizeOfOptionalHeader,
+         Characteristics: mSys.CARD16;
+         text, data, bss: тСекция
+      КОНЕЦ;
+
+   тЗаголовокKol = ЗАПИСЬ
+         menuet01: МАССИВ 8 ИЗ ЛИТ;
+         ver, start, size, mem, sp, param, path: ЦЕЛОЕ
+      КОНЕЦ;
+
+   ETABLE = ЗАПИСЬ
+         reserved1, time, reserved2, dllnameoffset, firstnum, adrcount,
+         namecount, arradroffset, arrnameptroffset, arrnumoffset: ЦЕЛОЕ;
+         arradr, arrnameptr: МАССИВ 10000H ИЗ ЦЕЛОЕ;
+         arrnum: МАССИВ 10000H ИЗ mSys.CARD16;
+         text: МАССИВ 1000000 ИЗ ЛИТ;
+         textlen, size: ЦЕЛОЕ
+      КОНЕЦ;
+
+   тРелок = ЗАПИСЬ
+         страница, Size: ЦЕЛОЕ;
+         reloc: МАССИВ 1024 ИЗ mSys.CARD16
+      КОНЕЦ;
+
+ПЕРЕМ
+   asmlist: мЦепь.туЦепь;
+   start: мАт.туЗвеноАсм;
+   MemErr: мАт.тПроцедура;
+   dll, con, gui, kos, elf, obj: БУЛЕВО;
+   Lcount, reccount, topstk: ЦЕЛОЕ;
+   recarray: МАССИВ 2048 ИЗ ЦЕЛОЕ;
+   current*: мАт.туЗвеноАсм;
+   callstk: МАССИВ 1024, 2 ИЗ мАт.туЗвеноАсм;
+   OutFile: мСтр.тСтрока;
+   Code: МАССИВ 4000000 ИЗ ЛИТ; ccount: ЦЕЛОЕ; Data: МАССИВ 1000000 ИЗ ЛИТ; dcount: ЦЕЛОЕ;
+   Labels: МАССИВ 200000 ИЗ ЦЕЛОЕ;
+   rdata: МАССИВ 400H ИЗ ЦЕЛОЕ;
+   Header: тЗаголовок;
+   etable: ETABLE;
+   ExecName: мСтр.тСтрока;
+   LoadAdr: ЦЕЛОЕ; Reloc: МАССИВ 200000 ИЗ ЛИТ; rcount: ЦЕЛОЕ;
+   RtlProc: МАССИВ 20 ИЗ ЦЕЛОЕ; OutFilePos: ЦЕЛОЕ;
+   RelocSection: тСекция;
+   стрФайлИмя_глоб: мСтр.тСтрока;
+   fpu*: ЦЕЛОЕ;
+   isfpu: БУЛЕВО;
+   maxfpu: ЦЕЛОЕ;
+   fpucmd: мАт.туЗвеноАсм;
+   kosexp: МАССИВ 65536 ИЗ ЗАПИСЬ
+      уЗвеноСущ: мКс.туЗвКс;
+      Adr, NameLabel: ЦЕЛОЕ
+   КОНЕЦ;
+   kosexpcount: ЦЕЛОЕ;
+
+ПРОЦЕДУРА ФайлЛин_Уст*(name: мСтр.тСтрока);
+   НАЧАЛО
+      стрФайлИмя_глоб := name
+   КОНЕЦ ФайлЛин_Уст;
+
+ПРОЦЕДУРА ПроцРтл_Добавить*(idx, proc: ЦЕЛОЕ);
+   НАЧАЛО
+      RtlProc[idx] := proc
+   КОНЕЦ ПроцРтл_Добавить;
+
+ПРОЦЕДУРА IntToCard16(i: ЦЕЛОЕ): mSys.CARD16;
+   ПЕРЕМ
+      w: mSys.CARD16;
+   НАЧАЛО
+      mSys.GET(mSys.ADR(i), w)
+      ВЕРНУТЬ w
+   КОНЕЦ IntToCard16;
+
+ПРОЦЕДУРА CopyStr(ПЕР Dest: МАССИВ ИЗ ЛИТ; Source: МАССИВ ИЗ ЛИТ; ПЕР di: ЦЕЛОЕ; si: ЦЕЛОЕ);
+   НАЧАЛО
+      ВЫЧ(di);
+      ПОВТОРЯТЬ
+      ДОБ(di);
+      Dest[di] := Source[si];
+      ДОБ(si)
+      ПОКАНЕ Dest[di] = 0X
+   КОНЕЦ CopyStr;
+
+ПРОЦЕДУРА exch(ПЕР a, b: ЦЕЛОЕ);
+   ПЕРЕМ
+      c: ЦЕЛОЕ;
+   НАЧАЛО
+      c := a;
+      a := b;
+      b := c
+   КОНЕЦ exch;
+
+ПРОЦЕДУРА Sort(ПЕР NamePtr, Adr: МАССИВ ИЗ ЦЕЛОЕ; Text: МАССИВ ИЗ ЛИТ; LB, RB: ЦЕЛОЕ);
+   ПЕРЕМ
+      L, R: ЦЕЛОЕ;
+
+   ПРОЦЕДУРА strle(s1, s2: ЦЕЛОЕ): БУЛЕВО; (* вот это что??? не работает? *)
+      ПЕРЕМ
+         S1, S2: МАССИВ 256 ИЗ ЛИТ; i: ЦЕЛОЕ;
+      НАЧАЛО
+         i := 0;
+         CopyStr(S1, Text, i, s1);
+         i := 0;
+         CopyStr(S2, Text, i, s2)
+         ВЕРНУТЬ S1 <= S2
+      КОНЕЦ strle;
+
+   НАЧАЛО
+      ЕСЛИ LB < RB ТОГДА
+         L := LB;
+         R := RB;
+         ПОВТОРЯТЬ
+            ПОКА (L < RB) & strle(NamePtr[L], NamePtr[LB]) ДЕЛАТЬ
+               ДОБ(L)
+            КОНЕЦ;
+            ПОКА (R > LB) & strle(NamePtr[LB], NamePtr[R]) ДЕЛАТЬ
+               ВЫЧ(R)
+            КОНЕЦ;
+            ЕСЛИ L < R ТОГДА
+               exch(NamePtr[L], NamePtr[R]);
+               exch(Adr[L], Adr[R])
+            КОНЕЦ
+            ПОКАНЕ L >= R;
+               ЕСЛИ R > LB ТОГДА
+                  exch(NamePtr[LB], NamePtr[R]);
+                  exch(Adr[LB], Adr[R]);
+                  Sort(NamePtr, Adr, Text, LB, R - 1)
+               КОНЕЦ;
+               Sort(NamePtr, Adr, Text, R + 1, RB)
+      КОНЕЦ
+   КОНЕЦ Sort;
+
+ПРОЦЕДУРА PackExport(Name: МАССИВ ИЗ ЛИТ);
+   ПЕРЕМ
+      i: ЦЕЛОЕ;
+   НАЧАЛО
+      Sort(etable.arrnameptr, etable.arradr, etable.text, 0, etable.namecount - 1);
+      ДЛЯ i := 0 ДО etable.namecount - 1 ДЕЛАТЬ
+         etable.arrnum[i] := IntToCard16(i)
+      КОНЕЦ;
+      etable.size := 40 + etable.adrcount * 4 + etable.namecount * 6;
+      etable.arradroffset := 40;
+      etable.arrnameptroffset := 40 + etable.adrcount * 4;
+      etable.arrnumoffset := etable.arrnameptroffset + etable.namecount * 4;
+      etable.dllnameoffset := etable.size + etable.textlen;
+      CopyStr(etable.text, Name, etable.textlen, 0);
+      ДОБ(etable.textlen);
+      ДЛЯ i := 0 ДО etable.namecount - 1 ДЕЛАТЬ
+         etable.arrnameptr[i] := etable.arrnameptr[i] + etable.size
+      КОНЕЦ;
+      etable.size := etable.size + etable.textlen
+   КОНЕЦ PackExport;
+
+ПРОЦЕДУРА Проц_Экспортировать*(Number: ЦЕЛОЕ; уЗвеноСущ_: мКс.туЗвКс; NameLabel: ЦЕЛОЕ);
+   НАЧАЛО
+      ЕСЛИ dll ТОГДА
+         etable.arradr[etable.adrcount] := Number;
+         ДОБ(etable.adrcount);
+         etable.arrnameptr[etable.namecount] := etable.textlen;
+         ДОБ(etable.namecount);
+         CopyStr(etable.text, уЗвеноСущ_.сИмя, etable.textlen, 0);
+         ДОБ(etable.textlen)
+      АЕСЛИ obj ТОГДА
+         kosexp[kosexpcount].уЗвеноСущ := уЗвеноСущ_;
+         kosexp[kosexpcount].Adr := Number;
+         kosexp[kosexpcount].NameLabel := NameLabel;
+         ДОБ(kosexpcount)
+      КОНЕЦ
+   КОНЕЦ Проц_Экспортировать;
+
+ПРОЦЕДУРА Err(code: ЦЕЛОЕ);
+   НАЧАЛО
+      ВЫБОР code ИЗ
+         |1: мОш.Сообщ(67); мКонс.Строка_Печать(OutFile)
+         |2: мОш.Сообщ(69); мКонс.Строка_Печать(OutFile)
+         |3: мОш.Сообщ(58)
+         |4: мОш.Сообщ(88)
+      ИНАЧЕ
+      КОНЕЦ;
+      мКонс.НовСтр;
+      мПроц.Закончить(1)
+   КОНЕЦ Err;
+
+ПРОЦЕДУРА АдрВырав_Получ*(пцРазмер, пцВырав : ЦЕЛОЕ): ЦЕЛОЕ;
+      ВЕРНУТЬ пцРазмер + (пцВырав - пцРазмер ОСТ пцВырав) ОСТ пцВырав
+   КОНЕЦ АдрВырав_Получ;
+
+ПРОЦЕДУРА PutReloc(R: тРелок);
+   ПЕРЕМ
+      i: ЦЕЛОЕ;
+   НАЧАЛО
+      mSys.PUT(mSys.ADR(Reloc[rcount]), R.страница);
+      ДОБ(rcount, 4);
+      mSys.PUT(mSys.ADR(Reloc[rcount]), R.Size);
+      ДОБ(rcount, 4);
+      ДЛЯ i := 0 ДО ЗСП(R.Size - 8, 1) - 1 ДЕЛАТЬ
+         mSys.PUT(mSys.ADR(Reloc[rcount]), R.reloc[i]);
+         ДОБ(rcount, 2)
+      КОНЕЦ
+   КОНЕЦ PutReloc;
+
+ПРОЦЕДУРА InitArray(ПЕР adr: ЦЕЛОЕ; chars: мСтр.тСтрока);
+   ПЕРЕМ
+      i, x, n: ЦЕЛОЕ;
+   НАЧАЛО
+      n := LEN(chars) - 1;
+      i := 0;
+      ПОКА (i < n) & (chars[i] # 0X) ДЕЛАТЬ
+         x := мСкан.Лит16_в_Целое(chars[i]) * 16 + мСкан.Лит16_в_Целое(chars[i + 1]);
+         mSys.PUT(adr, ВЛИТ(x));
+         ДОБ(adr);
+         ДОБ(i, 2)
+      КОНЕЦ
+   КОНЕЦ InitArray;
+
+ПРОЦЕДУРА Файл_Записать(F, A, N: ЦЕЛОЕ);
+   НАЧАЛО
+      ЕСЛИ мФайл.Записать(F, A, N) # N ТОГДА
+         Err(2)
+      КОНЕЦ
+   КОНЕЦ Файл_Записать;
+
+ПРОЦЕДУРА Write(A, N: ЦЕЛОЕ);
+   НАЧАЛО
+      mSys.MOVE(A, OutFilePos, N);
+      OutFilePos := OutFilePos + N
+   КОНЕЦ Write;
+
+ПРОЦЕДУРА Fill(n: ЦЕЛОЕ; c: ЛИТ);
+   ПЕРЕМ
+      i: ЦЕЛОЕ;
+   НАЧАЛО
+      ДЛЯ i := 1 ДО n ДЕЛАТЬ
+         Write(mSys.ADR(c), 1)
+      КОНЕЦ
+   КОНЕЦ Fill;
+
+ПРОЦЕДУРА SetSection(ПЕР Section: тСекция; name: тСекцияИмя; size, adr, sizealign, OAPfile, attrflags: ЦЕЛОЕ);
+   НАЧАЛО
+      Section.имя := name;
+      Section.цРазмер := size;
+      Section.цАдрес := adr;
+      Section.sizealign := sizealign;
+      Section.OAPfile := OAPfile;
+      Section.attrflags := attrflags;
+   КОНЕЦ SetSection;
+
+ПРОЦЕДУРА New;
+   ПЕРЕМ
+      nov: мАт.туЗвеноАсм;
+   НАЧАЛО
+      НОВ(nov);
+      MemErr(nov = ПУСТО);
+      nov.кмд := ccount;
+      мЦепь.Вставить(asmlist, nov, current);
+      current := current.уЗвПрав(мАт.туЗвеноАсм)
+   КОНЕЦ New;
+
+ПРОЦЕДУРА Empty(varadr: ЦЕЛОЕ);
+   НАЧАЛО
+      New;
+      current.clen := 0;
+      current.tcmd := ECMD;
+      current.перем.адрес := varadr
+   КОНЕЦ Empty;
+
+ПРОЦЕДУРА OutByte(byte: ЦЕЛОЕ);
+   НАЧАЛО
+      New;
+      current.clen := 1;
+      Code[ccount] := ВЛИТ(byte);
+      ДОБ(ccount)
+   КОНЕЦ OutByte;
+
+ПРОЦЕДУРА OutInt(int: ЦЕЛОЕ);
+   НАЧАЛО
+      New;
+      current.clen := 4;
+      mSys.PUT(mSys.ADR(Code[ccount]), int);
+      ДОБ(ccount, 4)
+   КОНЕЦ OutInt;
+
+ПРОЦЕДУРА PushEAX; (* ================================================================= *)
+   НАЧАЛО
+      OutByte(50H);
+      current.tcmd := PUSH_EAX
+   КОНЕЦ PushEAX;
+
+ПРОЦЕДУРА PushECX; (* ================================================================= *)
+   НАЧАЛО
+      OutByte(51H);
+      current.tcmd := PUSHECX
+   КОНЕЦ PushECX;
+
+ПРОЦЕДУРА PushEDX; (* ================================================================= *)
+   НАЧАЛО
+      OutByte(52H);
+      current.tcmd := PUSHEDX
+   КОНЕЦ PushEDX;
+
+ПРОЦЕДУРА PopEAX; (* ================================================================== *)
+   НАЧАЛО
+      OutByte(58H);
+      current.tcmd := POPEAX
+   КОНЕЦ PopEAX;
+
+ПРОЦЕДУРА PopECX;
+   НАЧАЛО
+      OutByte(59H);
+      current.tcmd := POPECX
+   КОНЕЦ PopECX;
+
+ПРОЦЕДУРА PopEDX;
+   НАЧАЛО
+      OutByte(5AH);
+      current.tcmd := POPEDX
+   КОНЕЦ PopEDX;
+
+ПРОЦЕДУРА OutCode(cmd: мСтр.тСтрока);
+   ПЕРЕМ
+      a, b: ЦЕЛОЕ;
+   НАЧАЛО
+      New;
+      a := mSys.ADR(Code[ccount]);
+      b := a;
+      InitArray(a, cmd);
+      ccount := a - b + ccount;
+      current.clen := a - b
+   КОНЕЦ OutCode;
+
+ПРОЦЕДУРА Del*(last: мАт.туЗвеноАсм);
+   НАЧАЛО
+      last.уЗвПрав := current.уЗвПрав;
+      ЕСЛИ current = asmlist.уЗвДальше ТОГДА
+         asmlist.уЗвДальше := last
+      КОНЕЦ;
+      current := last
+   КОНЕЦ Del;
+
+ПРОЦЕДУРА Метка_Новая*(): ЦЕЛОЕ;
+   НАЧАЛО
+      ДОБ(Lcount)
+      ВЕРНУТЬ Lcount
+   КОНЕЦ Метка_Новая;
+
+ПРОЦЕДУРА PushCall*(asmline: мАт.туЗвеноАсм);
+   НАЧАЛО
+      New;
+      callstk[topstk][0] := asmline;
+      callstk[topstk][1] := current;
+      ДОБ(topstk)
+   КОНЕЦ PushCall;
+
+ПРОЦЕДУРА Стек_Ограничить*;
+   НАЧАЛО
+      current := callstk[topstk - 1][0]
+   КОНЕЦ Стек_Ограничить;
+
+ПРОЦЕДУРА Вызов_Закончить*;
+  НАЧАЛО
+    current := callstk[topstk - 1][1];
+    ВЫЧ(topstk)
+  КОНЕЦ Вызов_Закончить;
+
+ПРОЦЕДУРА Настроить*(mem: мАт.тПроцедура; UI: ЦЕЛОЕ);
+  ПЕРЕМ
+    nov: мАт.туЗвеноАсм;
+  НАЧАЛО
+    dcount := 4;
+    dll := UI = 1;
+    gui := UI = 2;
+    con := UI = 3;
+    kos := UI = 4;
+    elf := UI = 5;
+    obj := UI = 6;
+    MemErr := mem;
+    Lcount := HALT;
+    asmlist := мЦепь.Создать();
+    MemErr(asmlist = ПУСТО);
+    НОВ(nov);
+    MemErr(nov = ПУСТО);
+    мЦепь.Зв_Доб(asmlist, nov);
+    current := nov;
+  КОНЕЦ Настроить;
+
+ПРОЦЕДУРА datastr(str: мСтр.тСтрока);
+  ПЕРЕМ i, n: ЦЕЛОЕ;
+  НАЧАЛО
+    i := 0;
+    n := LEN(str);
+    ПОКА (i < n) & (str[i] # 0X) ДЕЛАТЬ
+      Data[dcount] := str[i];
+      ДОБ(dcount);
+      ДОБ(i)
+    КОНЕЦ;
+    Data[dcount] := 0X;
+    ДОБ(dcount)
+  КОНЕЦ datastr;
+
+ПРОЦЕДУРА dataint(n: ЦЕЛОЕ);
+  НАЧАЛО
+    mSys.PUT(mSys.ADR(Data[dcount]), n);
+    ДОБ(dcount, 4)
+  КОНЕЦ dataint;
+
+ПРОЦЕДУРА Переход_Выполнить*(jamp: ЛИТ; label: ЦЕЛОЕ);
+   ПЕРЕМ
+      n: ЦЕЛОЕ;
+   НАЧАЛО
+      New;
+      ВЫБОР jamp ИЗ
+      |JMP, CALL:
+         n := 5
+      |JE, JLE, JGE, JG, JL, JNE:
+         Code[ccount] := 0FX;
+         ДОБ(ccount);
+         n := 6
+      ИНАЧЕ
+      КОНЕЦ;
+      current.clen := n;
+      Code[ccount] := jamp;
+      ДОБ(ccount);
+      current.код.адрес := mSys.ADR(Code[ccount]);
+      current.перем.адрес := mSys.ADR(Labels[label]);
+      current.tcmd := JCMD;
+      current.бКороткое := ИСТИНА;
+      ДОБ(ccount, 4)
+   КОНЕЦ Переход_Выполнить;
+
+ПРОЦЕДУРА jmplong(jamp: ЛИТ; label: ЦЕЛОЕ);
+   НАЧАЛО
+      Переход_Выполнить(jamp, label);
+      current.бКороткое := ЛОЖЬ
+   КОНЕЦ jmplong;
+
+ПРОЦЕДУРА Метку_Назначить*(label: ЦЕЛОЕ);
+  НАЧАЛО
+    New;
+    current.перем.адрес := mSys.ADR(Labels[label]);
+    current.tcmd := LCMD
+  КОНЕЦ Метку_Назначить;
+
+ПРОЦЕДУРА CmdN(Number: ЦЕЛОЕ);
+  НАЧАЛО
+    New;
+    current.clen := 4;
+    current.код.адрес := mSys.ADR(Code[ccount]);
+    current.перем.адрес := mSys.ADR(Labels[Number]);
+    current.tcmd := OCMD;
+    ДОБ(ccount, 4)
+  КОНЕЦ CmdN;
+
+ПРОЦЕДУРА IntByte(bytecode, intcode: мСтр.тСтрока; n: ЦЕЛОЕ);
+  НАЧАЛО
+    ЕСЛИ (n <= 127) & (n >= -128) ТОГДА
+      OutCode(bytecode);
+      OutByte(n)
+    ИНАЧЕ
+      OutCode(intcode);
+      OutInt(n)
+    КОНЕЦ
+  КОНЕЦ IntByte;
+
+ПРОЦЕДУРА AfterRet(func, float: БУЛЕВО; callconv, parsize: ЦЕЛОЕ);
+  НАЧАЛО
+    ЕСЛИ callconv = cdecl ТОГДА
+      OutCode("81C4");
+      OutInt(parsize)
+    КОНЕЦ;
+    ЕСЛИ func ТОГДА
+      ЕСЛИ float ТОГДА
+        OutCode("83EC08DD1C24")
+      ИНАЧЕ
+        PushEAX
+      КОНЕЦ
+    КОНЕЦ
+  КОНЕЦ AfterRet;
+
+ПРОЦЕДУРА FpuSave(local: ЦЕЛОЕ);
+  ПЕРЕМ i: ЦЕЛОЕ;
+  НАЧАЛО
+    ЕСЛИ fpu > maxfpu ТОГДА
+      maxfpu := fpu
+    КОНЕЦ;
+    ДЛЯ i := 1 ДО fpu ДЕЛАТЬ
+      IntByte("DD5D", "DD9D", -local - i * 8)
+    КОНЕЦ
+  КОНЕЦ FpuSave;
+
+ПРОЦЕДУРА Incfpu;
+  НАЧАЛО
+    ЕСЛИ fpu >= FREGS ТОГДА
+      мОш.СообщКоорд(мКрд.уОш, 97, мФайл.уФайл.стрИмя);
+      мПроц.Закончить(1)
+    КОНЕЦ;
+    ДОБ(fpu);
+    isfpu := ИСТИНА
+  КОНЕЦ Incfpu;
+
+ПРОЦЕДУРА FpuLoad(local: ЦЕЛОЕ; float: БУЛЕВО);
+  ПЕРЕМ i: ЦЕЛОЕ;
+  НАЧАЛО
+    ДЛЯ i := fpu ДО 1 ПО -1 ДЕЛАТЬ
+      IntByte("DD45", "DD85", -local - i * 8)
+    КОНЕЦ;
+    ЕСЛИ float ТОГДА
+      Incfpu;
+      OutCode("DD042483C408")
+    КОНЕЦ
+  КОНЕЦ FpuLoad;
+
+ПРОЦЕДУРА МПУ_Запретить*(long: БУЛЕВО);
+    НАЧАЛО
+      ЕСЛИ long ТОГДА
+        OutCode("83EC08DD1C24")
+      ИНАЧЕ
+        OutCode("83EC04D91C24")
+      КОНЕЦ;
+      ВЫЧ(fpu)
+    КОНЕЦ МПУ_Запретить;
+
+ПРОЦЕДУРА Процедуру_Вызвать*(proc: ЦЕЛОЕ; func, float: БУЛЕВО; callconv, ccall, bases, level, parsize, local: ЦЕЛОЕ);
+  ПЕРЕМ i: ЦЕЛОЕ;
+  НАЧАЛО
+    ЕСЛИ ccall # 0 ТОГДА
+      ДЛЯ i := level ДО level - bases + НЛИТ(ccall = 1) + 1 ПО -1 ДЕЛАТЬ
+        IntByte("FF75", "FFB5", 4 * i + 4)
+      КОНЕЦ;
+      ЕСЛИ ccall = 1 ТОГДА
+        OutByte(55H)
+      КОНЕЦ
+    КОНЕЦ;
+    FpuSave(local);
+    jmplong(CALL, proc);
+    AfterRet(func, float, callconv, parsize);
+    FpuLoad(local, func & float)
+  КОНЕЦ Процедуру_Вызвать;
+
+ПРОЦЕДУРА CallRTL(Proc: ЦЕЛОЕ);
+  НАЧАЛО
+    New;
+    current.clen := 5;
+    Code[ccount] := CALL;
+    ДОБ(ccount);
+    current.код.адрес := mSys.ADR(Code[ccount]);
+    current.перем.адрес := mSys.ADR(RtlProc[Proc]);
+    current.tcmd := JCMD;
+    ДОБ(ccount, 4)
+  КОНЕЦ CallRTL;
+
+ПРОЦЕДУРА НаСтек_ЦЕЛОЕ*(n: ЦЕЛОЕ);
+  НАЧАЛО
+  (* #ФИКС вообще-то код 64Н для PSH n *)
+    OutByte(68H);
+    CmdN(n)
+  КОНЕЦ НаСтек_ЦЕЛОЕ;
+
+ПРОЦЕДУРА Пролог*(exename: мСтр.тСтрока);
+  НАЧАЛО
+    ExecName := exename;
+    Labels[hInstance] := -dcount;
+    dataint(0);
+    Labels[SELFNAME] := -dcount;
+    datastr(exename);
+    Метку_Назначить(START);
+    ЕСЛИ dll ТОГДА
+      OutCode("558BEC837D0C007507");
+      CallRTL(_close);
+      OutCode("EB06837D0C017409B801000000C9C20C00")
+    АЕСЛИ obj ТОГДА
+      OutCode("558BEC")
+    КОНЕЦ;
+    start := asmlist.уЗвДальше(мАт.туЗвеноАсм)
+  КОНЕЦ Пролог;
+
+ПРОЦЕДУРА ЗАПИСЬ_Добавить*(base: ЦЕЛОЕ);
+  НАЧАЛО
+    ДОБ(reccount);
+    recarray[reccount] := base
+  КОНЕЦ ЗАПИСЬ_Добавить;
+
+ПРОЦЕДУРА CmpOpt(inv: БУЛЕВО): ЦЕЛОЕ;
+  ПЕРЕМ cur: мАт.туЗвеноАсм; c: ЦЕЛОЕ;
+  НАЧАЛО
+    c := НЛИТ(Code[current.уЗвЛев.уЗвЛев(мАт.туЗвеноАсм).кмд]);
+    ЕСЛИ inv ТОГДА
+      ЕСЛИ ODD(c) ТОГДА
+        ВЫЧ(c)
+      ИНАЧЕ
+        ДОБ(c)
+      КОНЕЦ
+    КОНЕЦ;
+    cur := current;
+    ПОВТОРЯТЬ
+      cur.tcmd := 0;
+      cur.clen := 0;
+      cur := cur.уЗвЛев(мАт.туЗвеноАсм)
+    ПОКАНЕ cur.tcmd = ICMP1;
+    cur.tcmd := 0;
+    cur.clen := 0
+    ВЕРНУТЬ c - 16
+  КОНЕЦ CmpOpt;
+
+ПРОЦЕДУРА ifwh*(L: ЦЕЛОЕ);
+  ПЕРЕМ c: ЦЕЛОЕ;
+  НАЧАЛО
+    ЕСЛИ current.уЗвЛев(мАт.туЗвеноАсм).tcmd = ICMP2 ТОГДА
+      c := CmpOpt(ИСТИНА);
+      OutCode("5A583BC2");
+      Переход_Выполнить(ВЛИТ(c), L)
+    ИНАЧЕ
+      PopECX;
+      OutCode("85C9");
+      Переход_Выполнить(JE, L)
+    КОНЕЦ
+  КОНЕЦ ifwh;
+
+ПРОЦЕДУРА НаСтек_КОНСТ*(Number: ЦЕЛОЕ);
+   НАЧАЛО
+      IntByte("6A", "68", Number);
+      current.уЗвЛев(мАт.туЗвеноАсм).перем.адрес := Number
+   КОНЕЦ НаСтек_КОНСТ;
+
+ПРОЦЕДУРА ЕслиПОКА*(L: ЦЕЛОЕ; orop: БУЛЕВО);
+  ПЕРЕМ c, L1: ЦЕЛОЕ;
+  НАЧАЛО
+    L1 := Метка_Новая();
+    ЕСЛИ current.уЗвЛев(мАт.туЗвеноАсм).tcmd = ICMP2 ТОГДА
+      c := CmpOpt(orop);
+      OutCode("5A583BC2");
+      Переход_Выполнить(ВЛИТ(c), L1);
+      НаСтек_КОНСТ(НЛИТ(orop))
+    ИНАЧЕ
+      PopECX;
+      OutCode("85C9");
+      ЕСЛИ orop ТОГДА
+        Переход_Выполнить(JE, L1)
+      ИНАЧЕ
+        Переход_Выполнить(JNE, L1)
+      КОНЕЦ;
+      PushECX
+    КОНЕЦ;
+    Переход_Выполнить(JMP, L);
+    Метку_Назначить(L1)
+  КОНЕЦ ЕслиПОКА;
+
+ПРОЦЕДУРА ЗАПИСЬ_Создать*;
+  НАЧАЛО
+    CallRTL(_newrec)
+  КОНЕЦ ЗАПИСЬ_Создать;
+
+ПРОЦЕДУРА ЗАПИСЬ_Направить*;
+  НАЧАЛО
+    CallRTL(_disprec)
+  КОНЕЦ ЗАПИСЬ_Направить;
+
+ПРОЦЕДУРА Строка*(уСтр_: мСтр.туСтрока);
+  НАЧАЛО
+    Labels[уСтр_.цНомер] := -dcount;
+    ЕСЛИ уСтр_.цДлина > 1 ТОГДА
+      datastr(уСтр_.стрСтрока)
+    АЕСЛИ уСтр_.цДлина = 1 ТОГДА
+      dataint(НЛИТ(уСтр_.стрСтрока[0]))
+    ИНАЧЕ
+      dataint(0)
+    КОНЕЦ
+  КОНЕЦ Строка;
+
+ПРОЦЕДУРА InsertFpuInit;
+  ПЕРЕМ t: мАт.туЗвеноАсм;
+  НАЧАЛО
+    ЕСЛИ isfpu ТОГДА
+      t := current;
+      current := fpucmd;
+      ЕСЛИ maxfpu > 0 ТОГДА
+        OutCode("83EC");
+        OutByte(maxfpu * 8)
+      КОНЕЦ;
+      OutCode("DBE3");
+      current := t
+    КОНЕЦ
+  КОНЕЦ InsertFpuInit;
+
+ПРОЦЕДУРА Проц_Начать*(Number, Local: ЦЕЛОЕ; Module: БУЛЕВО);
+  ПЕРЕМ i: ЦЕЛОЕ;
+  НАЧАЛО
+    ЕСЛИ Module ТОГДА
+      OutCode("EB0C");
+      Метку_Назначить(Number + 3);
+      НаСтек_ЦЕЛОЕ(Number + 2);
+      jmplong(JMP, HALT);
+      Метку_Назначить(Number + 1)
+    ИНАЧЕ
+      Метку_Назначить(Number)
+    КОНЕЦ;
+    OutCode("558BEC");
+    ЕСЛИ Local > 12 ТОГДА
+      IntByte("83EC", "81EC", Local);
+      OutCode("8BD733C08BFCB9");
+      OutInt(ЗСП(Local, 2));
+      OutCode("9CFCF3AB8BFA9D")
+    ИНАЧЕ
+      ДЛЯ i := 4 ДО Local ПО 4 ДЕЛАТЬ
+        OutCode("6A00")
+      КОНЕЦ
+    КОНЕЦ;
+    fpucmd := current;
+    fpu := 0;
+    maxfpu := 0;
+    isfpu := ЛОЖЬ
+  КОНЕЦ Проц_Начать;
+
+ПРОЦЕДУРА Покинуть*;
+  НАЧАЛО
+    OutByte(0C9H);
+    InsertFpuInit
+  КОНЕЦ Покинуть;
+
+ПРОЦЕДУРА ProcEnd*(Number, Param: ЦЕЛОЕ; func, float: БУЛЕВО);
+  НАЧАЛО
+    ЕСЛИ func & ~float ТОГДА
+      PopEAX
+    КОНЕЦ;
+    OutByte(0C9H);
+    ЕСЛИ Param = 0 ТОГДА
+      OutByte(0C3H)
+    ИНАЧЕ
+      OutByte(0C2H);
+      OutByte(Param ОСТ 256);
+      OutByte(ЗСП(Param, 8))
+    КОНЕЦ;
+    InsertFpuInit
+  КОНЕЦ ProcEnd;
+
+ПРОЦЕДУРА Модуль_Вызвать*(уСтр_: мСтр.туСтрока);
+  НАЧАЛО
+    Строка(уСтр_);
+    jmplong(JMP, уСтр_.цНомер + 1)
+  КОНЕЦ Модуль_Вызвать;
+
+ПРОЦЕДУРА Ассемблировать*(s: мСтр.тСтрока);
+  НАЧАЛО
+    OutCode(s)
+  КОНЕЦ Ассемблировать;
+
+ПРОЦЕДУРА АдресГлобальный*(offset: ЦЕЛОЕ);
+  НАЧАЛО
+    OutByte(0BAH);
+    OutInt(offset);
+    current.код.адрес := mSys.ADR(Code[ccount - 4]);
+    current.tcmd := GCMD;
+    PushEDX
+  КОНЕЦ АдресГлобальный;
+
+ПРОЦЕДУРА Моно*(Number: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    НаСтек_ЦЕЛОЕ(Number)
+  КОНЕЦ Моно;
+
+ПРОЦЕДУРА СтрМоно*;
+  НАЧАЛО
+    PopEDX;
+    OutCode("6A02");
+    PushEDX
+  КОНЕЦ СтрМоно;
+
+ПРОЦЕДУРА Отрицание*;
+  НАЧАЛО
+    PopECX;
+    OutCode("85C90F94C1");
+    PushECX
+  КОНЕЦ Отрицание;
+
+ПРОЦЕДУРА НАБОР_Отриц*;
+  НАЧАЛО
+    OutCode("F71424")
+  КОНЕЦ НАБОР_Отриц;
+
+ПРОЦЕДУРА Целое*(Op: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    ВЫБОР Op ИЗ
+    |мКонст.опПлюс:  OutCode("011424")
+    |мКонст.опМинус: OutCode("291424")
+    |мКонст.опУмнож:  OutCode("58F7EA"); PushEAX
+    ИНАЧЕ
+    КОНЕЦ
+  КОНЕЦ Целое;
+
+ПРОЦЕДУРА Действие_Уст*(Op: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    OutCode("58");
+    ВЫБОР Op ИЗ
+    |мКонст.опПлюс:  OutCode("0B")
+    |мКонст.опМинус: OutCode("F7D223")
+    |мКонст.опУмнож:  OutCode("23")
+    |мКонст.опДелен: OutCode("33")
+    ИНАЧЕ
+    КОНЕЦ;
+    OutCode("C2");
+    PushEAX
+  КОНЕЦ Действие_Уст;
+
+ПРОЦЕДУРА СПЦ_Уст*(newfpu: ЦЕЛОЕ);
+  НАЧАЛО
+    fpu := newfpu
+  КОНЕЦ СПЦ_Уст;
+
+ПРОЦЕДУРА НаСтек_ДЛИНВЕЩ*(x: ДЛИНВЕЩ);
+  ПЕРЕМ f: TFLT; L: ЦЕЛОЕ;
+  НАЧАЛО
+    mSys.PUT(mSys.ADR(f), x);
+    Incfpu;
+    ЕСЛИ x = 0.0D0 ТОГДА
+      OutCode("D9EE")
+    АЕСЛИ x = 1.0D0 ТОГДА
+      OutCode("D9E8")
+    ИНАЧЕ
+      L := Метка_Новая();
+      Labels[L] := -dcount;
+      dataint(f[0]);
+      dataint(f[1]);
+      OutByte(0BAH);
+      CmdN(L);
+      OutCode("DD02")
+    КОНЕЦ
+  КОНЕЦ НаСтек_ДЛИНВЕЩ;
+
+ПРОЦЕДУРА Вещ_Вычислить*(op: ЦЕЛОЕ);
+  ПЕРЕМ
+   n: ЦЕЛОЕ;
+  НАЧАЛО
+    OutCode("DE");
+    ВЫБОР op ИЗ
+    |мКонст.опПлюс:  n := 0C1H
+    |мКонст.опМинус: n := 0E9H
+    |мКонст.опУмнож:  n := 0C9H
+    |мКонст.опДелен: n := 0F9H
+    ИНАЧЕ
+    КОНЕЦ;
+    OutByte(n);
+    ВЫЧ(fpu)
+  КОНЕЦ Вещ_Вычислить;
+
+ПРОЦЕДУРА Вещ_Сравнить*(Op: ЦЕЛОЕ);
+  ПЕРЕМ n: ЦЕЛОЕ;
+  НАЧАЛО
+    OutCode("33C9DED9DFE09E0F");
+    ВЫБОР Op ИЗ
+    |мКонст.опРавно: n := 94H
+    |мКонст.опНеРавно: n := 95H
+    |мКонст.опМеньше: n := 97H
+    |мКонст.опБольше: n := 92H
+    |мКонст.опМеньшеИлиРавно: n := 93H
+    |мКонст.опБольшеИлиРавно: n := 96H
+    ИНАЧЕ
+    КОНЕЦ;
+    ВЫЧ(fpu, 2);
+    OutByte(n);
+    OutByte(0C1H);
+    PushECX
+  КОНЕЦ Вещ_Сравнить;
+
+ПРОЦЕДУРА fneg*;
+  НАЧАЛО
+    OutCode("D9E0")
+  КОНЕЦ fneg;
+
+ПРОЦЕДУРА Ошибку_Указать*(n: ЦЕЛОЕ);
+  НАЧАЛО
+    OutByte(68H);
+    OutInt(мКрд.уКод.цСтрока * 16 + n);
+    jmplong(JMP, мКрд.уКод.цМодуль + 3)
+  КОНЕЦ Ошибку_Указать;
+
+ПРОЦЕДУРА Остаток_Определить*(opmod: БУЛЕВО);
+  НАЧАЛО
+    PopECX;
+    ЕСЛИ opmod ТОГДА
+      OutCode("58E32E538BD833D9C1FB1F8BD0C1FA1F83F9FF750C3D0000008075055B6A00EB1AF7F985DB740685D2740203D15B52EB0A")
+    ИНАЧЕ
+      OutCode("58E32C538BD833D9C1FB1F8BD0C1FA1F83F9FF750B3D0000008075045B50EB19F7F985DB740585D27401485B50EB0A")
+    КОНЕЦ;
+    Ошибку_Указать(8)
+  КОНЕЦ Остаток_Определить;
+
+ПРОЦЕДУРА РТЛ_Уст*;
+  НАЧАЛО
+    CallRTL(_rset);
+    PushEAX
+  КОНЕЦ РТЛ_Уст;
+
+ПРОЦЕДУРА НАБОР_Вхождение*;
+  НАЧАЛО
+    CallRTL(_inset);
+    PushEAX
+  КОНЕЦ НАБОР_Вхождение;
+
+ПРОЦЕДУРА Дублировать*;
+  НАЧАЛО
+    PopEDX;
+    PushEDX;
+    PushEDX
+  КОНЕЦ Дублировать;
+
+ПРОЦЕДУРА Включение*(Op: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    PopEAX;
+    ЕСЛИ Op = мКонст.опМеньшеИлиРавно ТОГДА
+      PushEDX
+    ИНАЧЕ
+      PushEAX
+    КОНЕЦ;
+    OutCode("0BC25933C8E3046A00EB026A01")
+  КОНЕЦ Включение;
+
+ПРОЦЕДУРА Целое_Отриц*;
+  НАЧАЛО
+    OutCode("F71C24")
+  КОНЕЦ Целое_Отриц;
+
+ПРОЦЕДУРА Целое_Сравнить*(Op: ЦЕЛОЕ);
+   ПЕРЕМ
+      n: ЦЕЛОЕ;
+   НАЧАЛО
+    OutCode("33C95A583BC20F"); current.tcmd := ICMP1;
+    ВЫБОР Op ИЗ
+       |мКонст.опРавно: n := 94H
+       |мКонст.опНеРавно: n := 95H
+       |мКонст.опМеньше: n := 9CH
+       |мКонст.опБольше: n := 9FH
+       |мКонст.опМеньшеИлиРавно: n := 9EH
+       |мКонст.опБольшеИлиРавно: n := 9DH
+    ИНАЧЕ
+    КОНЕЦ;
+    OutByte(n);
+    OutCode("C1"); current.tcmd := ICMP2;
+    PushECX;
+   КОНЕЦ Целое_Сравнить;
+
+ПРОЦЕДУРА CallVar*(func, float: БУЛЕВО; callconv, parsize, local: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    OutCode("8B1285D2750A");
+    Ошибку_Указать(2);
+    FpuSave(local);
+    OutCode("FFD2");
+    AfterRet(func, float, callconv, parsize);
+    FpuLoad(local, func & float)
+  КОНЕЦ CallVar;
+
+ПРОЦЕДУРА АдресЛокальный*(offset, bases: ЦЕЛОЕ);
+  НАЧАЛО
+    ЕСЛИ bases = 0 ТОГДА
+      Empty(offset);
+      OutCode("8BD5")
+    ИНАЧЕ
+      IntByte("8B55", "8B95", 4 * bases + 4)
+    КОНЕЦ;
+    IntByte("83C2", "81C2", offset);
+    PushEDX;
+    ЕСЛИ bases = 0 ТОГДА
+      Empty(offset)
+    КОНЕЦ
+  КОНЕЦ АдресЛокальный;
+
+ПРОЦЕДУРА Поле*(offset: ЦЕЛОЕ);
+  НАЧАЛО
+    ЕСЛИ offset # 0 ТОГДА
+      IntByte("830424", "810424", offset)
+    КОНЕЦ
+  КОНЕЦ Поле;
+
+ПРОЦЕДУРА Тип_Отвязать*(n: ЦЕЛОЕ);
+  НАЧАЛО
+    IntByte("8B5424", "8B9424", n);
+    OutCode("FF72FC")
+  КОНЕЦ Тип_Отвязать;
+
+ПРОЦЕДУРА Защитить*(T: ЦЕЛОЕ; Check: БУЛЕВО);
+  НАЧАЛО
+    ЕСЛИ Check ТОГДА
+      PopEAX;
+      OutCode("85C074");
+      ЕСЛИ T <= 127 ТОГДА
+        OutByte(9)
+      ИНАЧЕ
+        OutByte(12)
+      КОНЕЦ;
+      PushEAX
+    КОНЕЦ;
+    НаСтек_КОНСТ(T);
+    PushEAX;
+    CallRTL(_checktype);
+    ЕСЛИ Check ТОГДА
+      PushEAX
+    ИНАЧЕ
+      OutCode("85C0750A");
+      Ошибку_Указать(3)
+    КОНЕЦ
+  КОНЕЦ Защитить;
+
+ПРОЦЕДУРА ПроцСобств_Выполнить*(proc: ЦЕЛОЕ);
+  НАЧАЛО
+    ВЫБОР proc ИЗ
+    |мКонст.процДОБ:   PopEDX; OutCode("590111")
+    |мКонст.процВЫЧ:   PopEDX; OutCode("592911")
+    |мКонст.процДОПОЛН:  PopEDX; OutCode("FF02")
+    |мКонст.процЗНСЛОЖ:  PopEDX; OutCode("FF0A")
+    |мКонст.процДОБВ:  PopEDX; OutCode("580910")
+    |мКонст.процВЫЧВ:  PopEDX; OutCode("582110")
+    |мКонст.sysBIT:  PopECX; OutCode("5A585333DB8A18E3050FABD3EB030FB3D388185B")
+    |мКонст.процУПАК:  OutCode("DB04245A5ADD02D9FDDD1A"); isfpu := ИСТИНА
+    |мКонст.процУПАКСПЕЦ: OutCode("DB04245A5AD902D9FDD91A"); isfpu := ИСТИНА
+    |мКонст.процРАСП:  PopEDX; OutCode("59DD01D9F4DD19DB1A"); isfpu := ИСТИНА
+    |мКонст.процРАСПСПЕЦ: PopEDX; OutCode("59D901D9F4D919DB1A"); isfpu := ИСТИНА
+    |мКонст.процКОПИЯ:  CallRTL(_strcopy)
+    |мКонст.sysMOVE: CallRTL(_savearr)
+    ИНАЧЕ
+    КОНЕЦ
+  КОНЕЦ ПроцСобств_Выполнить;
+
+ПРОЦЕДУРА Контроль*(proc, assrt: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    OutCode("85D2751368");
+    OutInt(мКрд.уКод.цСтрока * 16 + 1);
+    НаСтек_ЦЕЛОЕ(мКрд.уКод.цМодуль + 2);
+    ЕСЛИ proc = мКонст.процКОНТРОЛЬ ТОГДА
+      OutCode("6A026A")
+    ИНАЧЕ
+      OutCode("6A016A")
+    КОНЕЦ;
+    OutByte(assrt);
+    jmplong(JMP, ASSRT)
+  КОНЕЦ Контроль;
+
+ПРОЦЕДУРА ФункцВстр_Выполнить*(func: ЦЕЛОЕ);
+  НАЧАЛО
+    ВЫБОР func ИЗ
+    |мКонст.процАБС:    PopEDX; OutCode("85D27D02F7DA"); PushEDX
+    |мКонст.процАБСВ:   OutCode("D9E1")
+    |мКонст.процКВЕЩ:    OutCode("DB0424"); PopEAX; Incfpu;
+    |мКонст.процКЦЕЛ:  OutCode("83EC06D93C2466812424FFF366810C24FFF7D92C2483C402D9FCDB1C24"); ВЫЧ(fpu)
+    |мКонст.процЧЁТ:    OutCode("83242401")
+    |мКонст.процЦСП:    PopECX; OutCode("58D3C8"); PushEAX
+    |мКонст.процЗСП:    PopECX; OutCode("58D3F8"); PushEAX
+    |мКонст.процЛСЛ:    PopECX; OutCode("58D3E0"); PushEAX
+    |мКонст.процЛСП:    PopECX; OutCode("58D3E8"); PushEAX
+    |мКонст.процНЛИТ:    PopEDX; OutCode("85D274036A015A"); PushEDX
+    |мКонст.процДЛИНСТР: CallRTL(_length); PushEAX
+    |мКонст.sysBIT:   PopEDX; OutCode("5933C08A010FA3D072046A00EB026A01")
+    ИНАЧЕ
+    КОНЕЦ
+  КОНЕЦ ФункцВстр_Выполнить;
+
+ПРОЦЕДУРА Загрузить*(T: ЦЕЛОЕ);
+   ПЕРЕМ
+      lastcmd: мАт.туЗвеноАсм;
+      offset: ЦЕЛОЕ;
+
+   ПРОЦЕДУРА del;
+      НАЧАЛО
+         lastcmd.tcmd := 0;
+         offset := lastcmd.перем.адрес;
+         lastcmd := lastcmd.уЗвЛев(мАт.туЗвеноАсм);
+         ПОКА lastcmd.tcmd # ECMD ДЕЛАТЬ
+            lastcmd.clen := 0;
+            lastcmd.tcmd := 0;
+            lastcmd := lastcmd.уЗвЛев(мАт.туЗвеноАсм)
+         КОНЕЦ;
+         lastcmd.tcmd := 0
+      КОНЕЦ del;
+
+  НАЧАЛО
+    lastcmd := current;
+    ВЫБОР T ИЗ
+    |мКонст.сущЦЕЛОЕ, мКонст.сущНАБОР, мКонст.сущУКАЗАТЕЛЬ, мКонст.сущПРОЦЕДУРА:
+      ЕСЛИ lastcmd.tcmd = ECMD ТОГДА
+        del;
+        IntByte("8B55", "8B95", offset);
+        PushEDX
+      ИНАЧЕ
+        PopEDX;
+        OutCode("FF32")
+      КОНЕЦ
+    |мКонст.сущЛИТЕРА, мКонст.сущБУЛЕВО:
+      ЕСЛИ lastcmd.tcmd = ECMD ТОГДА
+        del;
+        OutCode("33D28A");
+        IntByte("55", "95", offset);
+        PushEDX
+      ИНАЧЕ
+        PopEDX;
+        OutCode("33C98A0A");
+        PushECX
+      КОНЕЦ
+    |мКонст.сущДЛИНВЕЩ:
+      ЕСЛИ lastcmd.tcmd = ECMD ТОГДА
+        del;
+        IntByte("DD45", "DD85", offset)
+      ИНАЧЕ
+        PopEDX;
+        OutCode("DD02")
+      КОНЕЦ;
+      Incfpu
+    |мКонст.сущВЕЩ:
+      ЕСЛИ lastcmd.tcmd = ECMD ТОГДА
+        del;
+        IntByte("D945", "D985", offset)
+      ИНАЧЕ
+        PopEDX;
+        OutCode("D902")
+      КОНЕЦ;
+      Incfpu
+    |мКонст.сущ16:
+      ЕСЛИ lastcmd.tcmd = ECMD ТОГДА
+        del;
+        OutCode("33D2668B");
+        IntByte("55", "95", offset);
+        PushEDX
+      ИНАЧЕ
+        PopEDX;
+        OutCode("33C9668B0A");
+        PushECX
+      КОНЕЦ
+    ИНАЧЕ
+    КОНЕЦ
+  КОНЕЦ Загрузить;
+
+ПРОЦЕДУРА Тип_Сохр*(T: ЦЕЛОЕ);
+  НАЧАЛО
+    ВЫБОР T ИЗ
+    |мКонст.сущЦЕЛОЕ, мКонст.сущНАБОР, мКонст.сущУКАЗАТЕЛЬ, мКонст.сущПРОЦЕДУРА:
+      PopEDX;
+      OutCode("588910")
+    |мКонст.сущЛИТЕРА, мКонст.типСТРОКА, мКонст.сущБУЛЕВО:
+      PopEDX;
+      OutCode("588810")
+    |мКонст.сущ16:
+      PopEDX;
+      OutCode("58668910")
+    |мКонст.сущДЛИНВЕЩ:
+      PopEDX;
+      OutCode("DD1A");
+      ВЫЧ(fpu)
+    |мКонст.сущВЕЩ:
+      PopEDX;
+      OutCode("D91A");
+      ВЫЧ(fpu)
+    |мКонст.сущЗАПИСЬ:
+      CallRTL(_saverec);
+      OutCode("83F800750A");
+      Ошибку_Указать(4)
+    |мКонст.сущМАССИВ:
+      CallRTL(_savearr)
+    ИНАЧЕ
+    КОНЕЦ
+  КОНЕЦ Тип_Сохр;
+
+ПРОЦЕДУРА OpenArray*(A: туTIDX; n: ЦЕЛОЕ);
+  ПЕРЕМ i: ЦЕЛОЕ;
+  НАЧАЛО
+    PopEDX;
+    ДЛЯ i := n - 1 ДО 0 ПО -1 ДЕЛАТЬ
+      НаСтек_КОНСТ(A.мас_размерн[i])
+    КОНЕЦ;
+    PushEDX
+  КОНЕЦ OpenArray;
+
+ПРОЦЕДУРА ИМЯ_Открыть*(n: ЦЕЛОЕ);
+  НАЧАЛО
+    OutByte(54H);
+    ЕСЛИ n > 1 ТОГДА
+      НаСтек_КОНСТ(n);
+      CallRTL(_arrayidx)
+    ИНАЧЕ
+      CallRTL(_arrayidx1)
+    КОНЕЦ;
+    PopEDX;
+    OutCode("85D2750A");
+    Ошибку_Указать(5);
+    PushEDX;
+  КОНЕЦ ИМЯ_Открыть;
+
+ПРОЦЕДУРА ИМЯ_Испр*(len, size: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    IntByte("5983FA", "5981FA", len);
+    OutCode("720A");
+    Ошибку_Указать(5);
+    ЕСЛИ size > 1 ТОГДА
+      IntByte("6BD2", "69D2", size)
+    КОНЕЦ;
+    OutCode("03D1");
+    PushEDX
+  КОНЕЦ ИМЯ_Испр;
+
+ПРОЦЕДУРА ИМЯ_Сохр*;
+  НАЧАЛО
+    PopEDX;
+    PopECX;
+    OutCode("03D1");
+    PushEDX
+  КОНЕЦ ИМЯ_Сохр;
+
+ПРОЦЕДУРА ДвойЗагрузка_Проверить*;
+  НАЧАЛО
+    PopEDX;
+    OutCode("528B125285D2750A");
+    Ошибку_Указать(6)
+  КОНЕЦ ДвойЗагрузка_Проверить;
+
+ПРОЦЕДУРА Двойная_Загрузка*;
+  НАЧАЛО
+    PopEDX;
+    OutCode("528B12");
+    PushEDX;
+  КОНЕЦ Двойная_Загрузка;
+
+ПРОЦЕДУРА ПУСТО_Проверить*;
+  НАЧАЛО
+    PopEDX;
+    OutCode("85D2750A");
+    Ошибку_Указать(6);
+    PushEDX;
+  КОНЕЦ ПУСТО_Проверить;
+
+ПРОЦЕДУРА ExtArray*(A: туTIDX; n, m: ЦЕЛОЕ);
+  ПЕРЕМ i: ЦЕЛОЕ;
+  НАЧАЛО
+    ДЛЯ i := n - 1 ДО 0 ПО -1 ДЕЛАТЬ
+      НаСтек_КОНСТ(A.мас_размерн[i])
+    КОНЕЦ;
+    OutByte(54H);
+    НаСтек_КОНСТ(n);
+    НаСтек_КОНСТ(m);
+    CallRTL(_arrayrot)
+  КОНЕЦ ExtArray;
+
+ПРОЦЕДУРА Адрес*(dim: ЦЕЛОЕ);
+  НАЧАЛО
+    ЕСЛИ dim > 0 ТОГДА
+      PopEDX;
+      OutCode("83C4");
+      OutByte(dim * 4);
+      PushEDX
+    КОНЕЦ
+  КОНЕЦ Адрес;
+
+(* #ФИКС ЭТООО КАААК???? *)
+ПРОЦЕДУРА МассивДл_Получ*(dim: ЦЕЛОЕ);
+  НАЧАЛО
+    PopEDX;
+    ЕСЛИ dim < 0 ТОГДА
+      НаСтек_КОНСТ(-dim)
+    АЕСЛИ dim > 1 ТОГДА
+      PopEDX;
+      OutCode("83C4");
+      OutByte((dim - 1) * 4);
+      PushEDX
+    КОНЕЦ
+  КОНЕЦ МассивДл_Получ;
+
+ПРОЦЕДУРА ДЛЯ_Начать*(inc: БУЛЕВО; ПЕР LBeg, LEnd: ЦЕЛОЕ);
+  НАЧАЛО
+    LEnd := Метка_Новая();
+    LBeg := Метка_Новая();
+    Метку_Назначить(LBeg);
+    OutCode("8B14248B4424043910");
+    ЕСЛИ inc ТОГДА
+      Переход_Выполнить(JG, LEnd)
+    ИНАЧЕ
+      Переход_Выполнить(JL, LEnd)
+    КОНЕЦ
+  КОНЕЦ ДЛЯ_Начать;
+
+ПРОЦЕДУРА ДЛЯ_Выполнять*(step, LBeg, LEnd: ЦЕЛОЕ);
+  НАЧАЛО
+    OutCode("8B542404");
+    ЕСЛИ step = 1 ТОГДА
+      OutCode("FF02")
+    АЕСЛИ step = -1 ТОГДА
+      OutCode("FF0A")
+    ИНАЧЕ
+      IntByte("8302", "8102", step)
+    КОНЕЦ;
+    Переход_Выполнить(JMP, LBeg);
+    Метку_Назначить(LEnd);
+    OutCode("83C408")
+  КОНЕЦ ДЛЯ_Выполнять;
+
+ПРОЦЕДУРА ВЫБОР_Выполнить*(a, b, LBeg: ЦЕЛОЕ);
+  ПЕРЕМ L: ЦЕЛОЕ;
+  НАЧАЛО
+    L := Метка_Новая();
+    IntByte("83FA", "81FA", a);
+    ЕСЛИ a = b ТОГДА
+      Переход_Выполнить(JNE, L)
+    ИНАЧЕ
+      Переход_Выполнить(JL, L);
+      IntByte("83FA", "81FA", b);
+      Переход_Выполнить(JG, L)
+    КОНЕЦ;
+    Переход_Выполнить(JMP, LBeg);
+    Метку_Назначить(L)
+  КОНЕЦ ВЫБОР_Выполнить;
+
+ПРОЦЕДУРА Отбросить*;
+  НАЧАЛО
+    PopEDX
+  КОНЕЦ Отбросить;
+
+ПРОЦЕДУРА Строки_Сравнить*(Op, LR: ЦЕЛОЕ);
+   НАЧАЛО
+      ВЫБОР Op ИЗ
+         |мКонст.опРавно:   НаСтек_КОНСТ(0)
+         |мКонст.опНеРавно: НаСтек_КОНСТ(1)
+         |мКонст.опМеньше:  НаСтек_КОНСТ(2)
+         |мКонст.опБольше:  НаСтек_КОНСТ(3)
+         |мКонст.опМеньшеИлиРавно: НаСтек_КОНСТ(4)
+         |мКонст.опБольшеИлиРавно: НаСтек_КОНСТ(5)
+      ИНАЧЕ
+      КОНЕЦ;
+      ВЫБОР LR ИЗ
+         |-1: CallRTL(_lstrcmp)
+         | 0: CallRTL(_strcmp)
+         | 1: CallRTL(_rstrcmp)
+      ИНАЧЕ
+      КОНЕЦ;
+      PushEAX
+   КОНЕЦ Строки_Сравнить;
+
+ПРОЦЕДУРА Оптимизировать;
+  ПЕРЕМ
+    cur: мАт.туЗвеноАсм;
+    flag: БУЛЕВО;
+  НАЧАЛО
+    cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+    ПОКА cur # ПУСТО ДЕЛАТЬ
+      flag := ЛОЖЬ;
+      ВЫБОР cur.tcmd ИЗ
+      |PUSH_EAX:
+        flag := cur.уЗвПрав(мАт.туЗвеноАсм).tcmd = POPEAX
+      |PUSHECX:
+        flag := cur.уЗвПрав(мАт.туЗвеноАсм).tcmd = POPECX
+      |PUSHEDX:
+        flag := cur.уЗвПрав(мАт.туЗвеноАсм).tcmd = POPEDX
+      ИНАЧЕ
+      КОНЕЦ;
+      ЕСЛИ flag ТОГДА
+        cur.clen := 0;
+        cur.tcmd := 0;
+        cur := cur.уЗвПрав(мАт.туЗвеноАсм);
+        cur.clen := 0;
+        cur.tcmd := 0
+      КОНЕЦ;
+      cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+    КОНЕЦ
+  КОНЕЦ Оптимизировать;
+
+ПРОЦЕДУРА FixLabels(стрФайлИмя: МАССИВ ИЗ ЛИТ; stk, gsize, glob: ЦЕЛОЕ);
+   ПЕРЕМ
+      size, asize, i, rdatasize, RCount, n, temp, temp2, temp3: ЦЕЛОЕ;
+      cur: мАт.туЗвеноАсм;
+      R: тРелок;
+      c: ЛИТ;
+
+   ПРОЦЕДУРА ИспКолибри_Записать(стрФайлИмя: МАССИВ ИЗ ЛИТ; stk, size, datasize, gsize: ЦЕЛОЕ; obj: БУЛЕВО);
+      КОНСТ
+         strsize = 2048;
+      ПЕРЕМ
+         Header: тЗаголовокKol;
+         i, filesize, filebuf, a, sec, adr, size2: ЦЕЛОЕ;
+         cur: мАт.туЗвеноАсм;
+         Coff: тЗаголовокCoff;
+         sym: МАССИВ 18 * 4 ИЗ ЛИТ;
+         FileName: мСтр.тСтрока;
+         уФайл:мФайл.туФайл;
+      НАЧАЛО
+         НОВ(уФайл);
+         уФайл.цНомер := мФайл.Создать(стрФайлИмя);
+         ЕСЛИ уФайл.цНомер <= 0 ТОГДА
+            Err(1)
+         КОНЕЦ;
+         OutFilePos := мПам.Получ(АдрВырав_Получ(size, 4) + datasize + 1000H);
+         filebuf := OutFilePos;
+         мПам.Мало(OutFilePos = 0);
+
+         ЕСЛИ ~obj ТОГДА
+            Header.menuet01 := "MENUET01";
+            Header.ver := 1;
+            Header.start := mSys.SIZE(тЗаголовокKol);
+            Header.size := АдрВырав_Получ(size, 4) + datasize;
+            Header.mem := Header.size + stk + gsize + strsize * 2 + 1000H;
+            Header.sp := Header.size + gsize + stk;
+            Header.param := Header.sp;
+            Header.path := Header.param + strsize;
+
+            Write(mSys.ADR(Header), mSys.SIZE(тЗаголовокKol));
+
+            cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+            ПОКА cur # ПУСТО ДЕЛАТЬ
+               Write(mSys.ADR(Code[cur.кмд]), cur.clen);
+               cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+            КОНЕЦ;
+            Fill(АдрВырав_Получ(size, 4) - size, 0X);
+            Write(mSys.ADR(Data), datasize);
+            Файл_Записать(уФайл.цНомер, filebuf, OutFilePos - filebuf)
+         ИНАЧЕ
+            size2 := size;
+            size := АдрВырав_Получ(size, 4) - mSys.SIZE(тЗаголовокKol);
+            Coff.Machine := IntToCard16(014CH);
+            Coff.NumberOfSections := IntToCard16(3);
+            Coff.TimeDateStamp := мКонст.дата;
+            Coff.SizeOfOptionalHeader := IntToCard16(0);
+            Coff.Characteristics := IntToCard16(0184H);
+
+            Coff.text.имя := ".flat";
+            Coff.text.цРазмер := 0;
+            Coff.text.цАдрес := 0;
+            Coff.text.sizealign := size;
+            Coff.text.OAPfile := 8CH;
+            Coff.text.reserved6 := size + datasize + 8CH;
+            Coff.text.reserved7 := 0;
+            Coff.text.attrflags := 40300020H;
+
+            Coff.data.имя := ".data";
+            Coff.data.цРазмер := 0;
+            Coff.data.цАдрес := 0;
+            Coff.data.sizealign := datasize;
+            Coff.data.OAPfile := size + 8CH;
+            Coff.data.reserved6 := 0;
+            Coff.data.reserved7 := 0;
+            Coff.data.reserved8 := 0;
+            Coff.data.attrflags := 0C0300040H;
+
+            Coff.bss.имя := ".bss";
+            Coff.bss.цРазмер := 0;
+            Coff.bss.цАдрес := 0;
+            Coff.bss.sizealign := gsize;
+            Coff.bss.OAPfile := 0;
+            Coff.bss.reserved6 := 0;
+            Coff.bss.reserved7 := 0;
+            Coff.bss.reserved8 := 0;
+            Coff.bss.attrflags := 0C03000C0H;
+
+            size := АдрВырав_Получ(size2, 4);
+            rcount := 0;
+            cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+            ПОКА cur # ПУСТО ДЕЛАТЬ
+               ЕСЛИ cur.tcmd IN {OCMD, GCMD} ТОГДА
+                  mSys.GET(mSys.ADR(Code[cur.кмд]), a);
+                  ЕСЛИ a < size ТОГДА
+                     a := a - mSys.SIZE(тЗаголовокKol);
+                     sec := 1
+                  АЕСЛИ a < size + datasize ТОГДА
+                     a := a - size;
+                     sec := 2
+                  ИНАЧЕ
+                     a := a - size - datasize;
+                     sec := 3
+                  КОНЕЦ;
+                  mSys.PUT(mSys.ADR(Code[cur.кмд]), a);
+                  mSys.PUT(mSys.ADR(Reloc[rcount]), cur.адр.адрес - mSys.SIZE(тЗаголовокKol));
+                  ДОБ(rcount, 4);
+                  mSys.PUT(mSys.ADR(Reloc[rcount]), sec);
+                  ДОБ(rcount, 4);
+                  mSys.PUT(mSys.ADR(Reloc[rcount]), 06X); ДОБ(rcount);
+                  mSys.PUT(mSys.ADR(Reloc[rcount]), 00X); ДОБ(rcount);
+               КОНЕЦ;
+               Write(mSys.ADR(Code[cur.кмд]), cur.clen);
+               cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+            КОНЕЦ;
+            size := size2;
+            Fill(АдрВырав_Получ(size, 4) - size2, 0X);
+            Write(mSys.ADR(Data), datasize);
+            Coff.text.reserved8 := rcount ДЕЛ 10;
+            Coff.PointerToSymbolTable := Coff.text.reserved6 + rcount;
+            Coff.NumberOfSymbols := 4;
+
+            Файл_Записать(уФайл.цНомер, mSys.ADR(Coff), mSys.SIZE(тЗаголовокCoff));
+            Файл_Записать(уФайл.цНомер, filebuf, OutFilePos - filebuf);
+            Файл_Записать(уФайл.цНомер, mSys.ADR(Reloc), rcount);
+
+            adr := mSys.ADR(sym);
+            InitArray(adr, "4558504F52545300000000000100000002002E666C617400000000000000010000000300");
+            InitArray(adr, "2E64617461000000000000000200000003002E6273730000000000000000030000000300");
+            mSys.PUT(mSys.ADR(sym) + 8, Labels[Exports] - mSys.SIZE(тЗаголовокKol));
+
+            Файл_Записать(уФайл.цНомер, mSys.ADR(sym), LEN(sym));
+            i := 4;
+            Файл_Записать(уФайл.цНомер, mSys.ADR(i), 4)
+         КОНЕЦ;
+         мФайл.Закрыть(уФайл)
+      КОНЕЦ ИспКолибри_Записать;
+
+   ПРОЦЕДУРА ИспЛинукс_Записать(стрФайлИмя_: МАССИВ ИЗ ЛИТ; code, data, glob: ЦЕЛОЕ);
+      ПЕРЕМ
+         res, delta: ЦЕЛОЕ;
+         cur: мАт.туЗвеноАсм;
+         bytes: МАССИВ 817H + 55FH + 4900 ИЗ ЛИТ;
+         уФайл: мФайл.туФайл;
+
+      ПРОЦЕДУРА Add(offset: ЦЕЛОЕ);
+         ПЕРЕМ
+            m: ЦЕЛОЕ;
+         НАЧАЛО
+            mSys.GET(mSys.ADR(bytes[offset]), m);
+            mSys.PUT(mSys.ADR(bytes[offset]), m + delta)
+         КОНЕЦ Add;
+
+      ПРОЦЕДУРА Sub(offset: ЦЕЛОЕ);
+         ПЕРЕМ
+            m: ЦЕЛОЕ;
+         НАЧАЛО
+            mSys.GET(mSys.ADR(bytes[offset]), m);
+            mSys.PUT(mSys.ADR(bytes[offset]), m - delta)
+         КОНЕЦ Sub;
+
+      НАЧАЛО
+         НОВ(уФайл);
+         уФайл.цНомер := мФайл.Открыть(стрФайлИмя_глоб, 0);
+         ЕСЛИ уФайл.цНомер = 0 ТОГДА
+            Err(3)
+         КОНЕЦ;
+         уФайл.цБуфер := mSys.ADR(bytes);
+         ЕСЛИ мФайл.Читать(уФайл, 817H + 55FH + 4900) # 817H + 55FH + 4900 ТОГДА
+            Err(4)
+         КОНЕЦ;
+         мФайл.Закрыть(уФайл);
+         bytes[0] := 7FX;
+
+         ВЫЧ(code, 13);
+
+         delta := АдрВырав_Получ(data, 1000H) - 100000H;
+         Add(0020H); Add(00A4H); Add(00A8H); Add(0258H); Add(02B8H); Add(0308H); Add(0494H); Add(049CH);
+         Add(04A4H); Add(0679H); Add(0681H); Add(06A4H); Add(06B0H); Add(06BAH); Add(0703H); Add(0762H);
+         Add(0774H); Add(0786H); Add(0819H); Add(0823H); Add(17C5H); Add(17E5H); Add(17E9H); Add(1811H);
+         Add(1839H); Add(1861H); Add(1889H); Add(1A25H); Add(1A95H); Add(1AA5H); Add(1C05H); Add(1C55H);
+         Add(1CE5H); Add(1D09H); Add(1D15H); Add(1D25H); Add(1D35H); Add(1D55H);
+
+         delta := АдрВырав_Получ(glob, 1000H) - 3200000H;
+         Add(00A8H); Add(17EDH); Add(1C09H); Add(1D25H);
+
+         delta := АдрВырав_Получ(code, 1000H) - 100000H;
+         Add(0020H); Add(0084H); Add(0088H); Add(0098H); Add(009CH); Add(00A0H); Add(00B8H); Add(00BCH);
+         Add(00C0H); Add(0118H); Add(011CH); Add(0120H); Add(0258H); Add(0278H); Add(02B8H); Add(0308H);
+         Add(048CH); Add(0494H); Add(049CH); Add(04A4H); Add(04ACH); Add(04B4H); Add(04BCH); Add(04C4H);
+         Add(04CCH); Add(04D4H); Add(04DCH); Add(04E4H); Add(04ECH); Add(04F4H); Add(04FCH); Add(0504H);
+         Add(050CH); Add(0514H); Add(052BH); Add(0544H); Add(054EH); Add(0554H); Add(055EH); Add(056EH);
+         Add(057EH); Add(058EH); Add(059EH); Add(05AEH); Add(05BEH); Add(05CEH); Add(05DEH); Add(05EEH);
+         Add(05FEH); Add(060EH); Add(061EH); Add(062EH); Add(064CH); Add(0651H); Add(0679H); Add(0681H);
+         Add(0686H); Add(068CH); Add(06A4H); Add(06ABH); Add(06B0H); Add(06BAH); Add(06D7H); Add(06EBH);
+         Add(0703H); Add(0762H); Add(0774H); Add(0786H); Add(0819H); Add(0823H); Add(0828H); Add(082DH);
+         Sub(0845H); Sub(087BH); Add(08DEH); Add(08E8H); Sub(0916H); Add(0C52H); Add(0C8AH); Add(0D0AH);
+         Add(1635H); Add(1655H); Add(1659H); Add(167DH); Add(1681H); Add(16A5H); Add(16A9H); Add(16CDH);
+         Add(16D1H); Add(16F5H); Add(16F9H); Add(171DH); Add(1721H); Add(1745H); Add(1749H); Add(176DH);
+         Add(1771H); Add(1795H); Add(1799H); Add(17BDH); Add(17C1H); Add(17E5H); Add(17E9H); Add(1811H);
+         Add(1839H); Add(1861H); Add(1889H); Add(1985H); Add(1995H); Add(19A5H); Add(19B5H); Add(19C5H);
+         Add(19D5H); Add(19E5H); Add(19F5H); Add(1A05H); Add(1A15H); Add(1A25H); Add(1A55H); Add(1A65H);
+         Add(1A75H); Add(1A95H); Add(1AA5H); Add(1AD5H); Add(1AE5H); Add(1AF5H); Add(1B05H); Add(1B25H);
+         Add(1B35H); Add(1B45H); Add(1B55H); Add(1B65H); Add(1B75H); Add(1BB5H); Add(1BC5H); Add(1BE5H);
+         Add(1C05H); Add(1C15H); Add(1C55H); Add(1C75H); Add(1CA5H); Add(1CB5H); Add(1CE5H); Add(1D05H);
+         Add(1D15H); Add(1D25H); Add(1D35H); Add(1D55H); Add(1D75H); Add(1D89H);
+
+         OutFilePos := мПам.Получ(code + data + 8000H);
+         уФайл.цБуфер := OutFilePos;
+         мПам.Мало(OutFilePos = 0);
+
+         Write(mSys.ADR(bytes), 817H);
+         Fill(2DDH, 90X);
+         cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+         ПОКА cur # ПУСТО ДЕЛАТЬ
+            Write(mSys.ADR(Code[cur.кмд]), cur.clen);
+            cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+         КОНЕЦ;
+         Fill(АдрВырав_Получ(code, 1000H) - code, 90X);
+         Write(mSys.ADR(bytes[817H]), 55FH);
+         Write(mSys.ADR(Data), data);
+         Fill(АдрВырав_Получ(data, 1000H) - data, 0X);
+         Write(mSys.ADR(bytes[817H + 55FH + 55FH]), 0DC5H);
+
+         уФайл.цНомер := мФайл.Создать(стрФайлИмя_);
+         ЕСЛИ уФайл.цНомер <= 0 ТОГДА
+            Err(1)
+         КОНЕЦ;
+         Файл_Записать(уФайл.цНомер, уФайл.цБуфер, OutFilePos - уФайл.цБуфер);
+         мФайл.Закрыть(уФайл)
+      КОНЕЦ ИспЛинукс_Записать;
+
+   ПРОЦЕДУРА ИспВин_Записать(стрФайлИмя_: МАССИВ ИЗ ЛИТ; stksize, codesize, datasize, rdatasize, gsize: ЦЕЛОЕ);
+      КОНСТ
+         textattr = 60000020H; rdataattr = 40000040H; dataattr = 0C0000040H; relocattr = 42000040H;
+      ПЕРЕМ
+         i, adr, acodesize, compver, версия, stkalloc, heapsize, heapalloc: ЦЕЛОЕ;
+         cur: мАт.туЗвеноАсм;
+         уФайл: мФайл.туФайл;
+      НАЧАЛО
+         НОВ(уФайл);
+         compver := 0;
+         версия := мКонст.номер_сборки;
+         stkalloc := stksize;
+         heapsize := 100000H;
+         heapalloc := 100000H;
+         acodesize := АдрВырав_Получ(codesize, 1000H) + 1000H;
+         adr := mSys.ADR(rdata);
+         уФайл.цДлина := acodesize + АдрВырав_Получ(rdatasize, 1000H) + АдрВырав_Получ(datasize, 1000H) + АдрВырав_Получ(rcount, 1000H);
+
+         InitArray(adr, "5000000040000000000000003400000000000000000000006200000000000000");
+         InitArray(adr, "0000000000000000000000000000000000000000500000004000000000000000");
+         InitArray(adr, "A4014C6F61644C6962726172794100001F0147657450726F6341646472657373");
+         InitArray(adr, "00006B65726E656C33322E646C6C0000");
+
+         rdata[ 0] := acodesize + 50H;
+         rdata[ 1] := acodesize + 40H;
+         rdata[ 3] := acodesize + 34H;
+         rdata[ 6] := acodesize + 62H;
+         rdata[ 7] := acodesize;
+         rdata[13] := acodesize + 50H;
+         rdata[14] := acodesize + 40H;
+
+         adr := mSys.ADR(Header.msdos);
+         InitArray(adr, "4D5A90000300000004000000FFFF0000B8000000000000004000000000000000");
+         InitArray(adr, "00000000000000000000000000000000000000000000000000000000B0000000");
+         InitArray(adr, "0E1FBA0E00B409CD21B8014CCD21546869732070726F6772616D2063616E6E6F");
+         InitArray(adr, "742062652072756E20696E20444F53206D6F64652E0D0D0A2400000000000000");
+         InitArray(adr, "5DCF9F8719AEF1D419AEF1D419AEF1D497B1E2D413AEF1D4E58EE3D418AEF1D4");
+         InitArray(adr, "5269636819AEF1D4000000000000000050450000");
+         Header.typecomp := IntToCard16(014CH);
+         ЕСЛИ dll ТОГДА
+            Header.seccount := IntToCard16(0004H);
+            Header.infflags := IntToCard16(210EH)
+         ИНАЧЕ
+            Header.seccount := IntToCard16(0003H);
+            Header.infflags := IntToCard16(010FH)
+         КОНЕЦ;
+         Header.time := мКонст.дата;
+         Header.PEoptsize := IntToCard16(00E0H);
+         Header.PEfile := IntToCard16(010BH);
+         Header.compver := IntToCard16(compver);
+         Header.codesize := АдрВырав_Получ(codesize, 200H);
+         Header.datasize := АдрВырав_Получ(datasize + gsize, 200H) + АдрВырав_Получ(rdatasize, 200H) + АдрВырав_Получ(rcount, 200H);
+         Header.startadr := 1000H;
+         Header.codeadr := 1000H;
+         Header.rdataadr := Header.codeadr + АдрВырав_Получ(codesize, 1000H);
+         Header.loadadr := LoadAdr;
+         Header.secalign := 1000H;
+         Header.filealign := 0200H;
+         Header.oldestver := 0004H;
+         Header.version := версия;
+         Header.oldestverNT := 0004H;
+         Header.filesize := АдрВырав_Получ(codesize, 1000H) + АдрВырав_Получ(datasize + gsize, 1000H) + АдрВырав_Получ(rdatasize, 1000H) + АдрВырав_Получ(rcount, 1000H) + 1000H;
+         Header.headersize := 0400H;
+         Header.UI := IntToCard16(НЛИТ(con) + 2);
+         Header.stksize := stksize;
+         Header.stkalloc := stkalloc;
+         Header.heapsize := heapsize;
+         Header.heapalloc := heapalloc;
+         Header.structcount := 10H;
+         ЕСЛИ dll ТОГДА
+            Header.structs[0].adr := Header.rdataadr + 0DAH;
+            Header.structs[0].size := etable.size
+         КОНЕЦ;
+
+         Header.structs[1].adr := Header.rdataadr + 0CH;
+         Header.structs[1].size := 28H;
+         Header.structs[12].adr := Header.rdataadr;
+         Header.structs[12].size := 0CH;
+
+         SetSection(Header.sections[0], ".text", codesize, 1000H, АдрВырав_Получ(codesize, 200H), 400H, textattr);
+         SetSection(Header.sections[1], ".rdata", rdatasize, АдрВырав_Получ(codesize, 1000H) + 1000H, АдрВырав_Получ(rdatasize, 200H),
+            АдрВырав_Получ(codesize, 200H) + 400H, rdataattr);
+         SetSection(Header.sections[2], ".data", datasize + gsize, АдрВырав_Получ(codesize, 1000H) + АдрВырав_Получ(rdatasize, 1000H) + 1000H,
+            АдрВырав_Получ(datasize, 200H), АдрВырав_Получ(codesize, 200H) + АдрВырав_Получ(rdatasize, 200H) + 400H, dataattr);
+
+         ЕСЛИ dll ТОГДА
+            SetSection(RelocSection, ".reloc", rcount, Header.sections[2].цАдрес + АдрВырав_Получ(datasize + gsize, 1000H), АдрВырав_Получ(rcount, 200H),
+               Header.sections[2].OAPfile + АдрВырав_Получ(datasize, 200H), relocattr);
+            Header.structs[5].adr := RelocSection.цАдрес;
+            Header.structs[5].size := rcount
+         КОНЕЦ;
+
+         уФайл.цНомер := мФайл.Создать(стрФайлИмя_);
+         ЕСЛИ уФайл.цНомер = 0 ТОГДА
+            Err(1)
+         КОНЕЦ;
+         OutFilePos := мПам.Получ(уФайл.цДлина);
+         уФайл.цБуфер := OutFilePos;
+         мПам.Мало(OutFilePos = 0);
+
+         Write(mSys.ADR(Header), mSys.SIZE(тЗаголовок));
+         ЕСЛИ dll ТОГДА
+            Write(mSys.ADR(RelocSection), mSys.SIZE(тСекция));
+            Fill(АдрВырав_Получ(mSys.SIZE(тЗаголовок) + mSys.SIZE(тСекция), 200H) - (mSys.SIZE(тЗаголовок) + mSys.SIZE(тСекция)), 0X)
+         ИНАЧЕ
+            Fill(АдрВырав_Получ(mSys.SIZE(тЗаголовок), 200H) - mSys.SIZE(тЗаголовок), 0X)
+         КОНЕЦ;
+
+         cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+         ПОКА cur # ПУСТО ДЕЛАТЬ
+            Write(mSys.ADR(Code[cur.кмд]), cur.clen);
+            cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+         КОНЕЦ;
+         Fill(АдрВырав_Получ(codesize, 200H) - codesize, 0X);
+         Write(mSys.ADR(rdata), 0DAH);
+         ЕСЛИ dll ТОГДА
+            etable.time := Header.time;
+            Write(mSys.ADR(etable), 40);
+            Write(mSys.ADR(etable.arradr), etable.adrcount * 4);
+            Write(mSys.ADR(etable.arrnameptr), etable.namecount * 4);
+            Write(mSys.ADR(etable.arrnum), etable.namecount * 2);
+            Write(mSys.ADR(etable.text), etable.textlen)
+         КОНЕЦ;
+         Fill(АдрВырав_Получ(rdatasize, 200H) - rdatasize, 0X);
+         Write(mSys.ADR(Data), datasize);
+         Fill(АдрВырав_Получ(datasize, 200H) - datasize, 0X);
+         ЕСЛИ dll ТОГДА
+            Write(mSys.ADR(Reloc), rcount);
+            Fill(АдрВырав_Получ(rcount, 200H) - rcount, 0X)
+         КОНЕЦ;
+         Файл_Записать(уФайл.цНомер, уФайл.цБуфер, OutFilePos - уФайл.цБуфер);
+         мФайл.Закрыть(уФайл)
+      КОНЕЦ ИспВин_Записать;
+
+   НАЧАЛО
+      dcount := АдрВырав_Получ(dcount, 4);
+      ЕСЛИ dll ТОГДА
+         LoadAdr := 10000000H;
+         PackExport(ExecName)
+      АЕСЛИ con ИЛИ gui ТОГДА
+         LoadAdr := 400000H
+      АЕСЛИ kos ИЛИ obj ТОГДА
+         LoadAdr := mSys.SIZE(тЗаголовокKol)
+      АЕСЛИ elf ТОГДА
+         LoadAdr := 134514420 + 1024;
+         ДОБ(gsize, 1024)
+      КОНЕЦ;
+
+      ЕСЛИ dll ИЛИ con ИЛИ gui ТОГДА
+         rdatasize := 0DAH + etable.size;
+         size := 1000H + LoadAdr;
+      АЕСЛИ kos ИЛИ elf ИЛИ obj ТОГДА
+         rdatasize := 0;
+         size := LoadAdr
+      КОНЕЦ;
+
+      Оптимизировать;
+      temp2 := size;
+      cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+      ПОКА cur # ПУСТО ДЕЛАТЬ
+         cur.адр.адрес := size;
+         ЕСЛИ cur.tcmd = LCMD ТОГДА
+            mSys.PUT(cur.перем.адрес, size)
+         КОНЕЦ;
+         size := size + cur.clen;
+         cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+      КОНЕЦ;
+
+      size := temp2;
+      cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+      ПОКА cur # ПУСТО ДЕЛАТЬ
+         cur.адр.адрес := size;
+         ЕСЛИ cur.tcmd = LCMD ТОГДА
+            mSys.PUT(cur.перем.адрес, size)
+         АЕСЛИ (cur.tcmd = JCMD) & cur.бКороткое ТОГДА
+            mSys.GET(cur.перем.адрес, i);
+            temp3 := i - cur.уЗвПрав(мАт.туЗвеноАсм).адр.адрес;
+            ЕСЛИ (-131 <= temp3) & (temp3 <= 123) ТОГДА
+               mSys.GET(cur(мАт.туЗвеноАсм).код.адрес - 1, c);
+               ЕСЛИ c = JMP ТОГДА
+                  mSys.PUT(cur(мАт.туЗвеноАсм).код.адрес - 1, 0EBX)
+               ИНАЧЕ (*JE, JNE, JLE, JGE, JG, JL*)
+                  mSys.PUT(cur(мАт.туЗвеноАсм).код.адрес - 2, НЛИТ(c) - 16);
+                  mSys.PUT(cur(мАт.туЗвеноАсм).код.адрес - 1, temp3);
+                  ВЫЧ(cur(мАт.туЗвеноАсм).код.адрес)
+               КОНЕЦ;
+               cur.clen := 2
+            КОНЕЦ
+         КОНЕЦ;
+         size := size + cur.clen;
+         cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+      КОНЕЦ;
+
+      ЕСЛИ dll ИЛИ con ИЛИ gui ТОГДА
+         asize := АдрВырав_Получ(size, 1000H)
+      АЕСЛИ kos ИЛИ obj ТОГДА
+         asize := АдрВырав_Получ(size, 4)
+      АЕСЛИ elf ТОГДА
+         asize := 134514420 + 6508 + АдрВырав_Получ(size - 13 - LoadAdr, 1000H)
+      КОНЕЦ;
+
+      ДЛЯ i := 0 ДО Lcount ДЕЛАТЬ
+         ЕСЛИ Labels[i] < 0 ТОГДА
+            Labels[i] := -Labels[i] + asize + АдрВырав_Получ(rdatasize, 1000H)
+         КОНЕЦ
+      КОНЕЦ;
+
+      temp := dcount;
+      ЕСЛИ elf ТОГДА
+         asize := asize + АдрВырав_Получ(dcount, 1000H) + 64 + 1024;
+         mSys.PUT(mSys.ADR(Code[glob + 1]), asize - 1024);
+         dcount := 0
+      КОНЕЦ;
+
+      ЕСЛИ dll ТОГДА
+         asize := asize - LoadAdr + 0DAH;
+         ДЛЯ i := 0 ДО etable.namecount - 1 ДЕЛАТЬ
+            etable.arradr[i] := Labels[etable.arradr[i]] - LoadAdr;
+            etable.arrnameptr[i] := etable.arrnameptr[i] + asize
+         КОНЕЦ;
+         etable.arradroffset := etable.arradroffset + asize;
+         etable.arrnameptroffset := etable.arrnameptroffset + asize;
+         etable.arrnumoffset := etable.arrnumoffset + asize;
+         etable.dllnameoffset := etable.dllnameoffset + asize;
+         asize := asize + LoadAdr - 0DAH
+      КОНЕЦ;
+      ЕСЛИ dll ИЛИ con ИЛИ gui ТОГДА
+         Labels[LoadLibrary] := asize + 4;
+         Labels[GetProcAddress] := asize;
+         R.страница := 0;
+         R.Size := 0;
+         RCount := 0;
+      КОНЕЦ;
+      cur := asmlist.уЗвПервое(мАт.туЗвеноАсм);
+
+      ДЛЯ i := 0 ДО LEN(RtlProc) - 1 ДЕЛАТЬ
+         RtlProc[i] := Labels[RtlProc[i]]
+      КОНЕЦ;
+
+      temp3 := asize + АдрВырав_Получ(rdatasize, 1000H) + dcount;
+      ПОКА cur # ПУСТО ДЕЛАТЬ
+         ВЫБОР cur.tcmd ИЗ
+            |JCMD:
+               mSys.GET(cur.перем.адрес, i);
+               mSys.PUT(cur.код.адрес, i - cur.уЗвПрав(мАт.туЗвеноАсм).адр.адрес)
+            |GCMD:
+               mSys.GET(cur.код.адрес, i);
+               mSys.PUT(cur.код.адрес, i + temp3)
+            |OCMD:
+               mSys.MOVE(cur.перем.адрес, cur.код.адрес, 4)
+         ИНАЧЕ
+         КОНЕЦ;
+         ЕСЛИ dll & (cur.tcmd IN {GCMD, OCMD}) ТОГДА
+            n := cur.адр.адрес - LoadAdr;
+            ЕСЛИ ЗСП(n, 12) = ЗСП(R.страница, 12) ТОГДА
+               R.reloc[RCount] := IntToCard16(n ОСТ 1000H + 3000H);
+               ДОБ(RCount);
+               ДОБ(R.Size, 2)
+            ИНАЧЕ
+               ЕСЛИ R.Size # 0 ТОГДА
+                  PutReloc(R)
+               КОНЕЦ;
+               R.страница := ЗСП(n, 12) * 1000H;
+               R.Size := 10;
+               R.reloc[0] := IntToCard16(n ОСТ 1000H + 3000H);
+               RCount := 1
+            КОНЕЦ
+         КОНЕЦ;
+         cur := cur.уЗвПрав(мАт.туЗвеноАсм)
+      КОНЕЦ;
+      ЕСЛИ R.Size # 0 ТОГДА
+         PutReloc(R)
+      КОНЕЦ;
+      ЕСЛИ dll ИЛИ con ИЛИ gui ТОГДА
+         ИспВин_Записать(стрФайлИмя, stk, size - 1000H - LoadAdr, dcount, rdatasize, gsize)
+      АЕСЛИ kos ИЛИ obj ТОГДА
+         ИспКолибри_Записать(стрФайлИмя, АдрВырав_Получ(stk, 4), size, dcount, gsize, obj)
+      АЕСЛИ elf ТОГДА
+         ИспЛинукс_Записать(стрФайлИмя, size - LoadAdr, temp, gsize)
+      КОНЕЦ
+   КОНЕЦ FixLabels;
+
+ПРОЦЕДУРА OutStringZ(str: МАССИВ ИЗ ЛИТ);
+   ПЕРЕМ
+      i: ЦЕЛОЕ;
+   НАЧАЛО
+      New;
+      current.clen := LENGTH(str);
+      ДЛЯ i := 0 ДО current.clen - 1 ДЕЛАТЬ
+         Code[ccount] := str[i];
+         ДОБ(ccount)
+      КОНЕЦ;
+      Code[ccount] := 0X;
+      ДОБ(ccount);
+      ДОБ(current.clen)
+   КОНЕЦ OutStringZ;
+
+ПРОЦЕДУРА Эпилог*(gsize: ЦЕЛОЕ; стрФайлИмя: МАССИВ ИЗ ЛИТ; stk: ЦЕЛОЕ);
+   ПЕРЕМ
+      i, glob: ЦЕЛОЕ;
+   НАЧАЛО
+      glob := 0;
+      gsize := АдрВырав_Получ(gsize, 4) + 4;
+      КОПИЯ(стрФайлИмя, OutFile);
+      Labels[RTABLE] := -dcount;
+      dataint(recarray[0]);
+      ДЛЯ i := 1 ДО reccount ДЕЛАТЬ
+         dataint(recarray[i])
+      КОНЕЦ;
+      current := start;
+      ЕСЛИ con ИЛИ gui ИЛИ dll ТОГДА
+         НаСтек_ЦЕЛОЕ(LoadLibrary);
+         НаСтек_ЦЕЛОЕ(GetProcAddress);
+         OutCode("5859FF31FF3054")
+      АЕСЛИ elf ТОГДА
+         OutCode("6800000000");
+         glob := current.кмд;
+      АЕСЛИ kos ИЛИ obj ТОГДА
+         OutByte(54H)
+      КОНЕЦ;
+      АдресГлобальный(0);
+      НаСтек_КОНСТ(ЗСП(gsize, 2));
+      НаСтек_ЦЕЛОЕ(RTABLE);
+      НаСтек_ЦЕЛОЕ(SELFNAME);
+      CallRTL(_init);
+      current := asmlist.уЗвДальше(мАт.туЗвеноАсм);
+      ЕСЛИ dll ТОГДА
+         OutCode("B801000000C9C20C00")
+      КОНЕЦ;
+      ЕСЛИ obj ТОГДА
+         OutCode("B801000000C9C20400")
+      КОНЕЦ;
+      OutCode("EB05");
+      Метку_Назначить(ASSRT);
+      CallRTL(_assrt);
+      OutCode("EB09");
+      Метку_Назначить(HALT);
+      OutCode("6A006A00");
+      CallRTL(_assrt);
+      OutCode("6A00");
+      CallRTL(_halt);
+      OutByte(90H);
+      ЕСЛИ obj ТОГДА
+         Метку_Назначить(Exports);
+         CmdN(szSTART); CmdN(START);
+         CmdN(szversion); OutInt(stk);
+         ДЛЯ i := 0 ДО kosexpcount - 1 ДЕЛАТЬ
+            CmdN(kosexp[i].NameLabel); CmdN(kosexp[i].Adr)
+         КОНЕЦ;
+         OutInt(0);
+         Метку_Назначить(szSTART); OutStringZ("START");
+         Метку_Назначить(szversion); OutStringZ("version");
+         ДЛЯ i := 0 ДО kosexpcount - 1 ДЕЛАТЬ
+            Метку_Назначить(kosexp[i].NameLabel);
+            OutStringZ(kosexp[i].уЗвеноСущ.сИмя)
+         КОНЕЦ
+      КОНЕЦ;
+      FixLabels(стрФайлИмя, stk, gsize, glob)
+   КОНЕЦ Эпилог;
+
+КОНЕЦ модАсмИнтел32.

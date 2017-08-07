@@ -1,0 +1,110 @@
+(*
+    Copyright 2013 Krotov Anton
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*)
+
+МОДУЛЬ модВинКонсоль;
+
+ИМПОРТ sys := SYSTEM, WINAPI;
+
+КОНСТ
+   чёрный*  = 0;   синий*     = 1;     зелёный*   = 2;   голубой*   = 3;
+   красный* = 4;   лиловый*   = 5;     жёлтый*    = 6;   белый*     = 7;
+   серый*   = 8;   свСиний*   = 9;     свЗелёный* = 10;  свГолубой* = 11;
+   свКрасный* = 12;свЛиловый* = 13;    свЖёлтый*  = 14;  свБелый*   = 15;
+
+ПЕРЕМ
+   уКонсольВывод: ЦЕЛОЕ;
+
+ПРОЦЕДУРА IntToCard16(число_: ЦЕЛОЕ): sys.CARD16;
+   ПЕРЕМ
+      слово: sys.CARD16;
+   НАЧАЛО
+      sys.GET(sys.ADR(число_), слово)
+      ВЕРНУТЬ слово
+   КОНЕЦ IntToCard16;
+
+ПРОЦЕДУРА Card16ToInt(слово_: sys.CARD16): ЦЕЛОЕ;
+   ПЕРЕМ
+      число: ЦЕЛОЕ;
+   НАЧАЛО
+      sys.PUT(sys.ADR(число), слово_)
+      ВЕРНУТЬ число
+   КОНЕЦ Card16ToInt;
+
+ПРОЦЕДУРА CoordToInt(зКоорд_: WINAPI.TCoord): ЦЕЛОЕ;
+   ПЕРЕМ
+      поз: ЦЕЛОЕ;
+   НАЧАЛО
+      sys.GET(sys.ADR(зКоорд_), поз)
+      ВЕРНУТЬ поз
+   КОНЕЦ CoordToInt;
+
+ПРОЦЕДУРА Курсор_Уст*(Х_, У_: ЦЕЛОЕ);
+   ПЕРЕМ
+      зКоорд: WINAPI.TCoord;
+   НАЧАЛО
+      зКоорд.X := IntToCard16(Х_);
+      зКоорд.Y := IntToCard16(У_);
+      WINAPI.SetConsoleCursorPosition(уКонсольВывод, CoordToInt(зКоорд));
+   КОНЕЦ Курсор_Уст;
+
+ПРОЦЕДУРА КурсорПоз_Получ*(ПЕР Х_, У_: ЦЕЛОЕ);
+   ПЕРЕМ
+      ScrBufInfo: WINAPI.TConsoleScreenBufferInfo;
+   НАЧАЛО
+      WINAPI.GetConsoleScreenBufferInfo(уКонсольВывод, ScrBufInfo);
+      Х_ := Card16ToInt(ScrBufInfo.dwCursorPosition.X);
+      У_ := Card16ToInt(ScrBufInfo.dwCursorPosition.Y)
+   КОНЕЦ КурсорПоз_Получ;
+
+ПРОЦЕДУРА Очистить*;
+   ПЕРЕМ
+      fill: ЦЕЛОЕ;
+      ScrBufInfo: WINAPI.TConsoleScreenBufferInfo;
+   НАЧАЛО
+      WINAPI.GetConsoleScreenBufferInfo(уКонсольВывод, ScrBufInfo);
+      fill := Card16ToInt(ScrBufInfo.dwSize.X) * Card16ToInt(ScrBufInfo.dwSize.Y);
+      WINAPI.FillConsoleOutputCharacter(уКонсольВывод, 20H, fill, 0, sys.ADR(fill));
+      WINAPI.FillConsoleOutputAttribute(уКонсольВывод, Card16ToInt(ScrBufInfo.wAttributes), fill, 0, sys.ADR(fill));
+      Курсор_Уст(0, 0);
+   КОНЕЦ Очистить;
+
+ПРОЦЕДУРА Цвет_Уст*(курсор_, фон_: ЦЕЛОЕ);
+   НАЧАЛО
+      ЕСЛИ (курсор_ В {0..15}) & (фон_ В {0..15}) ТОГДА
+         WINAPI.SetConsoleTextAttribute(уКонсольВывод, LSL(фон_, 4) + курсор_)
+      КОНЕЦ
+   КОНЕЦ Цвет_Уст;
+
+ПРОЦЕДУРА КурсорХ_Получ*(): ЦЕЛОЕ;
+   ПЕРЕМ
+      ScrBufInfo: WINAPI.TConsoleScreenBufferInfo;
+   НАЧАЛО
+      WINAPI.GetConsoleScreenBufferInfo(уКонсольВывод, ScrBufInfo)
+      ВЕРНУТЬ Card16ToInt(ScrBufInfo.dwCursorPosition.X)
+   END КурсорХ_Получ;
+
+ПРОЦЕДУРА КурсорУ_Получ*(): ЦЕЛОЕ;
+   ПЕРЕМ
+      ScrBufInfo: WINAPI.TConsoleScreenBufferInfo;
+   НАЧАЛО
+      WINAPI.GetConsoleScreenBufferInfo(уКонсольВывод, ScrBufInfo)
+      ВЕРНУТЬ Card16ToInt(ScrBufInfo.dwCursorPosition.Y)
+   КОНЕЦ КурсорУ_Получ;
+
+НАЧАЛО
+   уКонсольВывод := WINAPI.GetStdHandle(-11);
+КОНЕЦ модВинКонсоль.
